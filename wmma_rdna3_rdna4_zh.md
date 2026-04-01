@@ -61,7 +61,15 @@ RDNA 3 支持的 WMMA 类型组合如下：
 
 ### 波前模式：Wave32 与 Wave64
 
-RDNA 3 的 WMMA 可在 Wave32 或 Wave64 下发出（`*_w32` 与 `*_w64` intrinsic）。对 FP16/BF16 输入，每条 lane 的 `A_frag` 与 `B_frag` 各含 16 个半精度元素（打包在 VGPR 中）。`C_frag` / `D_frag` 每 lane 宽度取决于累加器类型与波前模式——例如 FP32 累加在 Wave32 下每 lane 常为 8 个累加 VGPR，Wave64 下为 4 个。操作数在 VGPR 中的打包随数据类型而变，`A`/`B` 的 lane 复制规则也随波前模式而变。
+**Wave32** 与 **Wave64** 表示 **波前宽度（wavefront size）**：一组线程（lane）以 **锁步** 执行 **同一条指令**，与 CUDA 中的 **warp** 是同一类概念（HIP 里常由 `warpSize` 反映）。**Wave32** 为每波 **32** 条 lane，**Wave64** 为 **64** 条。RDNA 3 的 WMMA 可通过编译器 intrinsic 的 `*_w32` 与 `*_w64` 在两种模式下发出。**Wave32** 是 RDNA 3 示例与多数公开工具链中的默认假设；**Wave64** 在老式 GCN 风格代码路径与许多 **CDNA**（数据中心）kernel 上仍很常见。务必使你选用的 intrinsic、编译选项与实际 **launch** 所对应的波前模式一致。
+
+**占用率与线程块形状：** 更宽的波前会改变在寄存器与 SIMD 资源固定时 **可同时驻留的波数**，因此不能笼统说某种宽度一定带来更高占用，需结合具体 kernel 分析。建议将线程块大小取为 **32 或 64 的倍数**，避免最后一个波大量空转。对 WMMA 而言，示例 kernel 常为一次 `*_w32` 运算配 **32 线程** 的 block；若改为 `*_w64`，除更换 intrinsic 后缀外，还必须相应修改 `C`/`D` 的 **逐 lane 装入与写回映射**。
+
+**控制流与 wave 级原语：** 同一波内若发生分支发散，硬件仍会对两条路径做掩码执行；波越宽，一次发散区域牵连的 lane 越多。依赖「当前波」语义的原语（如 ballot、shuffle 一类）同样随波宽而变：**Wave64** kernel 里参与的一组是 **64** 条 lane，而非 32。
+
+**一致性：** 单个 kernel 内波前模式应 **自始至终一致**——除非完全清楚 **ABI**（*Application Binary Interface*，应用程序二进制接口）在此处的含义，否则 **不要** 在同一入口把 `*_w32` 与 `*_w64` 的 WMMA builtin 混用。这里说的 ABI 指编译器与硬件为 **该 kernel** 假定的 **波前宽度**、**分片在每 lane 上的 VGPR 布局**，以及 WMMA 的 **指令 lowering** 约定，而不仅限于 C++ 层的函数符号与链接约定（如名称修饰等）。HIP/Clang 可通过选项或属性选择或提示波前模式；若要在 RDNA 上强制使用 Wave64，请参阅对应 ROCm 版本的发行说明。
+
+对 FP16/BF16 输入，每条 lane 的 `A_frag` 与 `B_frag` 各含 **16** 个半精度元素（打包在 VGPR 中）。**分片**（`*_frag`，即英文 **fragment**）指每条 lane 在一次 WMMA 中放在 **VGPR** 里的那一部分 A/B/C/D 寄存器映像；rocWMMA、CUDA WMMA 里也沿用该术语。`C_frag` / `D_frag` 每 lane 占用多少 **32 位 VGPR** 取决于累加器元素类型与波前模式。对完整 16×16 分块，每条 lane 在 Wave32 下仍对应 **8** 个输出位置、Wave64 下 **4** 个；变化的是这些值在寄存器中的具体打包方式。**FP32** / **INT32** 累加（`f32_16x16x16_*`、`i32_16x16x16_*`）：每个矩阵元素占一个 32 位 VGPR（Wave32 每 lane **8** 个，Wave64 **4** 个）。**打包 FP16 / BF16** 累加（`f16_16x16x16_f16`、`bf16_16x16x16_bf16`）：每个 32 位 VGPR 装两个元素（Wave32 每 lane **4** 个，Wave64 **2** 个）。Clang 仍可能以更宽的向量类型暴露分片（例如多个 `half`），并用 **`OPSEL`** 选择每对中的低 16 位或高 16 位。操作数在 VGPR 中的打包随数据类型而变，`A`/`B` 的 lane 复制规则也随波前模式而变（见下表）。
 
 #### 每条 lane 的 `A_frag` / `B_frag`（Wave32 与 Wave64 相同）
 
@@ -71,19 +79,22 @@ RDNA 3 的 WMMA 可在 Wave32 或 Wave64 下发出（`*_w32` 与 `*_w64` intrins
 | INT8（`iu8`） | 4 | 4× 打包 `iu8` | 16 字节 — Composable Kernel 在调用 `__builtin_amdgcn_wmma_i32_16x16x16_iu8_*` 时使用 `int8x16_t` 与 `bit_cast<int32x4_t>(…)`（[Wave32 `Run`](https://github.com/ROCm/composable_kernel/blob/develop/include/ck/utility/amd_wmma.hpp#L127-L137)、[Wave64 `Run`](https://github.com/ROCm/composable_kernel/blob/develop/include/ck/utility/amd_wmma.hpp#L247-L257)） |
 | INT4（`iu4`） | 2 | 8× 打包 `iu4` | 16 个 4 位操作数 |
 
-#### 波前模式：intrinsic、`C`/`D` VGPR、A/B 操作数复制
+#### 波前模式：intrinsic、每 lane `C`/`D` 的 32 位 VGPR 数、A/B 操作数复制
 
 | | Wave32（32 线程） | Wave64（64 线程） |
 |---|------------------|------------------|
 | Intrinsic | `__builtin_amdgcn_wmma_*_…_w32` | `__builtin_amdgcn_wmma_*_…_w64` |
-| 每 lane `C_frag` / `D_frag` VGPR | 8 | 4 |
+| 累加器 FP32 或 INT32（`f32_16x16x16_*`、`i32_16x16x16_*`）— 每 32 位 VGPR 一个元素 | 8 | 4 |
+| 累加器打包 FP16 / BF16（`f16_16x16x16_f16`、`bf16_16x16x16_bf16`）— 每 32 位 VGPR 两个元素 | 4 | 2 |
 | 操作数复制 | `A`/`B` 在 lane *i* 与 *i*+16 相同 | `A`/`B`：lane 0–15 的配置在 32–47、48–63 上重复 |
 
 #### Wave32 与 Wave64 的选择
 
-RDNA 3 示例与编译器侧通常默认 Wave32；选用 `_w32` 或 `_w64` 须与 kernel 波前模式及你为每 lane 8 个或 4 个 C/D VGPR 实现的存取模式一致。
+RDNA 3 示例与编译器侧通常默认 **Wave32**。选用 `_w32` 或 `_w64` 须与 kernel 的波前模式以及你对 `C`/`D` 的存取实现一致；上表已汇总：**FP32** / **INT32** 累加对应每 lane **8 或 4** 个 32 位 `C`/`D` VGPR，**打包 FP16/BF16** 累加对应 **4 或 2** 个。
 
 ### RDNA 3 寄存器布局
+
+本节所说的 **寄存器布局（register layout）** 指：**WMMA 分块里的每个矩阵元素如何对应到具体的 lane 与 VGPR**（含 A/B 在 lane 间的复制规则，以及 C/D 的行、列如何与 `threadIdx` / `lane` 绑定）。也就是「调用 intrinsic 前由谁从内存装入哪一项、返回后写回哪一项」在硬件寄存器层面的约定。
 
 在 Wave32 FP16 WMMA 中有 32 个线程，但 A、B 只需 16 种不同的操作数配置；每种配置在 lane *i* 与 *i*+16 上重复（寄存器相同）。将这 16 种配置编号为 t = 0…15：t 同时是 A 分块的一行下标与 B 分块的一列下标，且 A、B 使用同一个 t。
 
@@ -92,13 +103,17 @@ RDNA 3 示例与编译器侧通常默认 Wave32；选用 `_w32` 或 `_w64` 须�
 - `a_frag[k]` = A[t,k]，k = 0…15 —— A 分块的第 t 行。
 - `b_frag[k]` = B[k,t]，k = 0…15 —— B 分块的第 t 列。
 
-每线程将 16 个 FP16 打包进 8 个 VGPR（映射见 AMD ISA 文档）。在此布局下应按上述要点加载 A 的一行与 B 的一列——不要用「整列 A + 整行 B」的常见误解写法，否则 GPU 结果通常与 CPU 参考不一致。
+当 **`lda = ldb = 16`** 时，两次加载的**线性下标**都可写成 **`k*16+lane`**，但 **`lane` 含义不同**：在 A 中是行下标 `m`（列主序），在 B 中是列下标 `n`（行主序）；只是本例为密铺 16×16 且步长均为 16，地址形式才相同。若 **`lda` / `ldb` 不为 16**，两边的地址表达式一般会分开写。
 
-FP32 的 C/D：每线程拥有同一输出列上的 8 个 float（`lane` = 列）；半波 0 写偶数行，半波 1 写奇数行，行主序 `D[row*16+col]`。即 16 列 × 两个半波 = 32 线程。下文示例给出精确下标；Composable Kernel 的 WMMA 测试使用相同布局。
+每线程将 16 个 FP16 打包进 8 个 VGPR。权威的 per-lane 操作数布局见 [RDNA 3 ISA Reference Guide（PDF）](https://www.amd.com/content/dam/amd/en/documents/radeon-tech-docs/instruction-set-architectures/rdna3-shader-instruction-set-architecture-feb-2023_0.pdf)：在 PDF 内搜索 WMMA 指令助记符（例如 **`v_wmma_f32_16x16x16_f16`**）及其操作数说明（正式纸面页码随修订而变，故不在这里写死页码）。带图示的入门说明见 [GPUOpen — RDNA 3 上的 WMMA](https://gpuopen.com/learn/wmma_on_rdna3)。若要以工具查看寄存器级细节，可使用 [AMD Matrix Instruction Calculator](https://github.com/ROCm/amd_matrix_instruction_calculator)，例如：`python3 matrix_calculator.py --architecture gfx1100 --instruction v_wmma_f32_16x16x16_f16 --detail-instruction`。在此布局下应按上述要点加载 A 的一行与 B 的一列——不要用「整列 A + 整行 B」的常见误解写法，否则 GPU 结果通常与 CPU 参考不一致。
+
+FP32 **C / D**（累加器）：32 条线程按 **每列两条** 填满 16×16 输出分块。同一列上，一条线程负责该列 **8 个偶数行**位置的累加值，另一条负责 **8 个奇数行**位置，合起来共 16 行且不重复。在常见的块内编号下，这两条线程的序号相差 16。写回内存时用 **行主序**：先写完一整行从左到右，再进入下一行。示例 *samples/wmma_rdna3_fp16.cpp* 与 Composable Kernel 的 WMMA 测试采用同一约定。
 
 上述 A/B 复制特性在 RDNA 4 上被取消——这是下文要谈的关键改进之一。
 
 ### Intrinsic 语法
+
+以 `__builtin_amdgcn_wmma_f32_16x16x16_f16_w32` 为例，可从左到右理解为：`f32` 表示 C/D（累加器/结果）元素类型，`16x16x16` 表示 WMMA 分块形状（M×N×K），`f16` 表示 A/B 输入元素类型，`_w32` / `_w64` 表示波前模式。整数变体会替换类型字段（如 `i32_16x16x16_iu8`），并带额外控制位（`neg_a`、`neg_b`、`clamp`）。在 RDNA 4 上，命名规则相同但会追加 `_gfx12`。
 
 FP32 累加器（如 `f32_16x16x16_f16`、`f32_16x16x16_bf16`）：Clang 为三参数形式——无 `OPSEL`：
 

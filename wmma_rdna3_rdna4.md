@@ -61,60 +61,55 @@ RDNA 3 supports the following WMMA type combinations:
 
 ### Wavefront Mode: Wave32 vs Wave64
 
-RDNA 3 WMMA can be issued in Wave32 or Wave64 mode (`*_w32` vs `*_w64` intrinsics). For FP16/BF16 inputs, each lane’s `A_frag` and `B_frag` each hold 16 half-precision elements packed into VGPRs. `C_frag` and `D_frag` widths per lane depend on accumulator element type and wave mode—for example, FP32 accumulation uses 8 VGPRs per lane in Wave32 and 4 in Wave64. Operand packing into VGPRs depends on datatype, and `A`/`B` lane replication rules also depend on wave mode.
+**Wave32** and **Wave64** are *wavefront sizes*: how many threads (lanes) in a group execute the same instruction in lockstep, analogous to a CUDA warp. Wave32 uses 32 lanes per wave; Wave64 uses 64. RDNA 3 WMMA can be issued in either mode via `*_w32` vs `*_w64` compiler intrinsics. Wave32 is the usual default setting in RDNA 3 sample codes and documents. 
 
-#### `A_frag` / `B_frag` per lane (identical in Wave32 and Wave64)
+when programming wmma through Wave32 or Wave64, developers need to take the below factors into consideration:
 
-| A, B format | VGPRs / lane | Packing in each 32-bit VGPR | Input elements / fragment |
-|-------------|-------------|----------------------------|---------------------------|
-| FP16 / BF16 | 8 | 2× FP16 or BF16 | 16 |
-| INT8 (`iu8`) | 4 | 4× packed `iu8` | 16 bytes — Composable Kernel uses `int8x16_t` and `bit_cast<int32x4_t>(…)` at the `__builtin_amdgcn_wmma_i32_16x16x16_iu8_*` call ([Wave32 `Run`](https://github.com/ROCm/composable_kernel/blob/develop/include/ck/utility/amd_wmma.hpp#L127-L137), [Wave64 `Run`](https://github.com/ROCm/composable_kernel/blob/develop/include/ck/utility/amd_wmma.hpp#L247-L257)) |
-| INT4 (`iu4`) | 2 | 8× packed `iu4` | 16 4-bit operands |
+- Occupancy and launch shape: Wider waves change how many waves can be resident given fixed register and SIMD resources, so peak occupancy is not automatically better with one width or the other—it depends on your kernel. It is good practice to size thread blocks as a multiple of 32 or 64, so you do not leave most of a final wave idle. 
 
-#### Wave mode: intrinsics, `C`/`D` VGPRs, and `A`/`B` operand replication
+- Control flow and wave-scoped operations: Branches that diverge *within* a wave still execute both paths under hardware masking; wider waves mean more lanes can be affected by a single divergent region. Intrinsics and patterns that are defined over “the current wave” (e.g. ballot- or shuffle-style operations) also depend on wave width: a Wave64 kernel’s wave has 64 participating lanes, not 32.
 
-| | Wave32 (32 threads) | Wave64 (64 threads) |
-|---|-------------------------|-------------------------|
-| Intrinsics | `__builtin_amdgcn_wmma_*_…_w32` | `__builtin_amdgcn_wmma_*_…_w64` |
-| `C_frag` / `D_frag` VGPRs / lane | 8 | 4 |
-| Operand replication | `A`/`B` the same on lanes *i* and *i*+16 | `A`/`B` on lanes 0–15 repeated on 32–47 and 48–63 |
+- Consistency: Within one kernel, wave mode must be consistent, please do not mix `*_w32` and `*_w64` WMMA builtins in the same compilation unit for the same entry point. HIP/Clang options and attributes can select or hint wave mode.
 
-#### Choosing between Wave32 and Wave64
-
-Wave32 is the usual default in RDNA 3 samples and compilers; use `_w32` vs `_w64` to match your kernel’s wave mode and the accumulator store/load pattern you implement for 8 vs 4 C/D VGPRs per lane.
+- Fragment and VGPR:A fragment (`*_frag`) is the per-lane slice of A/B/C/D register image placed in VGPRs for one WMMA; rocWMMA and CUDA WMMA use the same term. Wave32 and Wave64 have the same VGPR number for A/B fraement, but different size for C/D. 
+For FP16/BF16 inputs, each lane’s `A_frag` and `B_frag` each hold 16 half-precision elements packed into VGPRs, which means 8 VGPRS per lane for Wave32 and Wave64. Accordingly,each `A_frag` and `B_frag` needs 4 VGPRS per lane for Int8 input,and 2 VGPRs per lane for Int4 datatype. How many 32-bit VGPRs each lane needs for `C_frag` / `D_frag` depends on the accumulator element type and wave mode. FP32/INT32 accumulation needs 8 VGPRs per lane in Wave32, 4 in Wave64. Packed FP16 / BF16 accumulation needs 4 VGPRs per lane in Wave32, 2 in Wave64. 
 
 ### RDNA 3 Register Layout
 
-In Wave32 FP16 WMMA there are 32 threads, but A and B only need 16 different operand setups; each setup is duplicated on lanes *i* and *i*+16 (same registers on both). Number those setups t = 0…15: t is one row index into the A tile and one column index into the B tile, and you use the same t for both.
+**Register layout** here means how each matrix element in the WMMA tile maps to a specific lane and VGPR, including `A`/`B` replication across lanes and how `C`/`D` rows and columns bind to `thread`/`lane` — in other words, which thread loads which memory element before the intrinsic and which thread stores which element afterward at the hardware register level.
+
+We take Wave32 FP16 input/FP32 accumulator as an example to introduce RDNA3 WMMA layout.
+
+In Wave32 FP16 WMMA there are 32 threads, but A and B only need 16 different operand inputs; each input is duplicated on lanes *i* and *i*+16 (same registers on both). Number those setups t = 0…15: t is one row index into the A tile and one column index into the B tile, and you use the same t for both.This A/B replication quirk is eliminated on RDNA 4 — a key improvement discussed below.
 
 With A column-major (`A[m,k]` at `k*16+m`) and B row-major (`B[k,n]` at `k*16+n`), AMD GPUOpen and Composable Kernel tests use:
 
 - `a_frag[k]` = A[t,k] for k = 0…15 — row t of the A tile.
 - `b_frag[k]` = B[k,t] for k = 0…15 — column t of the B tile.
 
-Each thread packs 16 FP16 into 8 VGPRs (AMD ISA documentation shows the mapping). Under this layout, load one row of A and one column of B as in the bullets above—not a full A column with a full B row—or the GPU output will usually not match a CPU reference.
 
-FP32 C/D: each thread owns 8 floats in one output column (`lane` = column); half-wave 0 writes even rows, half-wave 1 odd rows, using row-major `D[row*16+col]`. That is 16 columns × two half-waves = 32 threads. The kernels below give the exact indices; Composable Kernel WMMA tests use the same layout.
+For FP32 C and D (accumulator), the thirty-two threads fill a 16×16 output tile by assigning two threads to each output column. One thread supplies eight accumulators for the even rows in that column, the other for the odd rows, so the column is complete with no overlap. In the usual block ordering, those two threads sit sixteen positions apart. After the instruction, scatter results in row-major form—each full row of the tile laid out left to right before the next row. The sample *samples/wmma_rdna3_fp16.cpp* and Composable Kernel WMMA tests use the same convention.
 
-This A/B replication quirk is eliminated on RDNA 4 — a key improvement discussed below.
 
 ### Intrinsic Syntax
 
-FP32 accumulator (e.g. `f32_16x16x16_f16`, `f32_16x16x16_bf16`): Clang expects three arguments — no `OPSEL`:
+Reading left to right, `__builtin_amdgcn_wmma_f32_16x16x16_f16_w32` means: `f32` is the `C`/`D` (accumulator / result) element type, `16x16x16` is the WMMA tile shape (M×N×K), `f16` is the `A`/`B` input element type, and `_w32` / `_w64` is the wave mode. Integer variants swap the type fields (e.g. `i32_16x16x16_iu8`) and add control bits (`neg_a`, `neg_b`, `clamp`). 
+
+For FP32 accumulator (e.g. `f32_16x16x16_f16`, `f32_16x16x16_bf16`), Clang expects three arguments — no `OPSEL`:
 
 ```c
 D_frag = __builtin_amdgcn_wmma_f32_16x16x16_<AB_type>_w<32|64>(
     A_frag, B_frag, C_frag);
 ```
 
-FP16 / BF16 accumulator (e.g. `f16_16x16x16_f16`): a fourth `OPSEL` argument selects low vs high 16 bits in packed result VGPRs (`false` / `true`).
+For FP16 / BF16 accumulator (e.g. `f16_16x16x16_f16`), a fourth `OPSEL` argument selects low vs high 16 bits in packed result VGPRs (`false` / `true`).
 
 ```c
 D_frag = __builtin_amdgcn_wmma_f16_16x16x16_f16_w<32|64>(
     A_frag, B_frag, C_frag, OPSEL);
 ```
 
-Integer WMMA variants take `neg_a` / `neg_b` / `clamp` and packed operands. `i32_16x16x16_iu8` uses `int32x4` (`__builtin_bit_cast` from 16×`int8`; Composable Kernel [`Run`](https://github.com/ROCm/composable_kernel/blob/develop/include/ck/utility/amd_wmma.hpp#L127-L137)). `i32_16x16x16_iu4` uses `int32x2` (16 int4 nibbles in two `int32`s; `__builtin_amdgcn_wmma_i32_16x16x16_iu4_w32`). CK uses `neg_a` and `neg_b` both `true` for Wave32 iu8; iu4 matches that in [`builtin_wmma_naive_selector` (int4 path)](https://github.com/ROCm/composable_kernel/blob/develop/test/wmma_op/wmma_op_util.hpp#L84-L96) when built with `CK_EXPERIMENTAL_BIT_INT_EXTENSION_INT4`. Operand gather for both follows the [`matmul`](https://github.com/ROCm/composable_kernel/blob/develop/test/wmma_op/wmma_op_util.hpp#L98-L192) kernel, not FP16-style direct global loads. Confirm parameter order with your ROCm Clang builtin declarations.
+Integer WMMA variants take `neg_a` / `neg_b` / `clamp` and packed operands. `i32_16x16x16_iu8` uses `int32x4` (`__builtin_bit_cast` from 16×`int8` ,see the sample code in [Composable Kernel](https://github.com/ROCm/composable_kernel/blob/develop/include/ck/utility/amd_wmma.hpp#L127-L137)). `i32_16x16x16_iu4` uses `int32x2` (16 int4 nibbles in two `int32`s; `__builtin_amdgcn_wmma_i32_16x16x16_iu4_w32`). CK uses `neg_a` and `neg_b` both `true` for Wave32 iu8; iu4 matches that in [`builtin_wmma_naive_selector` (int4 path)](https://github.com/ROCm/composable_kernel/blob/develop/test/wmma_op/wmma_op_util.hpp#L84-L96) when built with `CK_EXPERIMENTAL_BIT_INT_EXTENSION_INT4`. Operand gather for both follows the [`matmul code`](https://github.com/ROCm/composable_kernel/blob/develop/test/wmma_op/wmma_op_util.hpp#L98-L192) kernel, not FP16-style direct global loads. Developers can refer these sample codes in your projects. 
 
 ### Example: FP16 Input, FP32 Output (Wave32, RDNA 3)
 
@@ -127,12 +122,6 @@ hipcc --offload-arch=gfx1100 samples/wmma_rdna3_fp16.cpp -o wmma_rdna3_fp16
 ./wmma_rdna3_fp16
 ```
 
-Example output (values depend on inputs; error should stay small, e.g. on the order of `1e-3`…`1e-2` for this ramp data):
-
-```
-CPU ref D[0][0] = ..., GPU D[0][0] = ...
-Max abs error (CPU vs GPU): ...
-```
 
 ### Example: INT8 input, INT32 output (Wave32, RDNA 3)
 

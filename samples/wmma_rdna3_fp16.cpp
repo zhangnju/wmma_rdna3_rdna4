@@ -9,7 +9,6 @@
 #include <cmath>
 #include <iostream>
 #include <vector>
-#include <cstring>
 
 // Vector type aliases for WMMA fragments
 // On RDNA3 Wave32: A and B need 8 VGPRs each (16 fp16 values packed 2 per VGPR)
@@ -27,24 +26,28 @@ __global__ void wmma_gemm_rdna3(
           float*  __restrict__ D)   // [16 x 16], row-major (output)
 {
     const int lIdx  = threadIdx.x;   // 0–31, blockDim.x == 32
-    const int lane  = lIdx % 16;     // logical column of D / B column index
-    const int wave2 = lIdx / 16;     // 0 = lanes 0–15, 1 = lanes 16–31 (duplicate operands)
+    const int lane  = lIdx % 16;     // output col of D; B column index; A row index (see comments above)
+    // Same wave2 for A/B duplication (lanes i and i+16 share operands) and for C/D: even vs odd rows in column `lane`.
+    const int wave2 = lIdx / 16;     // 0 = threads 0–15, 1 = 16–31
 
     // ---- Load A fragment -----------------------------------------------
-    // A column-major: A[m,k] at index k*16+m.  One ROW m = lane (GPUOpen-style).
+    // A column-major: A[m,k] at k*lda+m (lda=16).  Fix row m = lane, scan k → one row of A.
     fp16x16 a_frag;
     #pragma unroll
     for (int k = 0; k < 16; k++)
         a_frag[k] = (_Float16)A[k * 16 + lane];
 
     // ---- Load B fragment -----------------------------------------------
-    // B row-major: B[k,n] at k*16+n.  One COLUMN n = lane.
+    // B row-major: B[k,n] at k*ldb+n (ldb=16).  Fix column n = lane, scan k → one column of B.
+    // Same linear index k*16+lane as A: lane is row index m here but column index n above;
+    // for dense 16×16 tiles both strides are 16, so the address formula coincides.
     fp16x16 b_frag;
     #pragma unroll
     for (int k = 0; k < 16; k++)
         b_frag[k] = (_Float16)B[k * 16 + lane];
 
-    // ---- Load C fragment (same layout as D store; see Composable Kernel WMMA tests) ----
+    // ---- Load C fragment (same layout as D store) ----
+    // 8 floats per thread cover half the rows in column `lane`: r = i*2+wave2 → even rows if wave2==0, odd if ==1.
     fp32x8 c_frag;
     #pragma unroll
     for (int i = 0; i < 8; i++) {
@@ -56,7 +59,7 @@ __global__ void wmma_gemm_rdna3(
     fp32x8 d_frag = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32(
         a_frag, b_frag, c_frag);
 
-    // ---- Store D fragment ----------------------------------------------
+    // ---- Store D fragment (row-major D[r*16+lane], same r pattern as C) ----
     #pragma unroll
     for (int i = 0; i < 8; i++) {
         const int r = i * 2 + wave2;
