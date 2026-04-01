@@ -4,7 +4,8 @@
 // D = A*B + C for 16x16 int4 tiles (stored as int8 in [-8,7]), int32 accumulators,
 // RDNA 3 Wave32 WMMA (i32_16x16x16_iu4).
 //
-// Operand gather matches the Composable Kernel wmma_op matmul path (same as wmma_rdna3_iu8.cpp).
+// Shared-memory swizzle + neg flags match Composable Kernel wmma_op matmul (same as wmma_rdna3_iu8.cpp).
+// Global layout: A column-major M×K, B row-major K×N; loads map to the same staged bytes as CK’s A RM / B CM path.
 // Each int4 is in the low 4 bits of an int8 buffer element; pack 16 nibbles into int32x2 for the builtin.
 
 #include <hip/hip_runtime.h>
@@ -34,8 +35,8 @@ __device__ int32x2 pack_iu4_x16(int8x16 v)
 }
 
 __global__ void wmma_gemm_rdna3_iu4(
-    const int8_t* __restrict__ A,   // [16 x 16] M×K row-major, int4 in low 4 bits
-    const int8_t* __restrict__ B,   // [16 x 16] K×N col-major
+    const int8_t* __restrict__ A,   // [16 x 16] M×K column-major, int4 in low 4 bits
+    const int8_t* __restrict__ B,   // [16 x 16] K×N row-major
     const int32_t* __restrict__ C,  // [16 x 16] row-major
     int32_t* __restrict__ D)
 {
@@ -48,10 +49,12 @@ __global__ void wmma_gemm_rdna3_iu4(
 
     int8_t a_temp[8];
     int8_t b_temp[8];
+    // Same (m,k)/(k,n) as CK row-major A / col-major B loads; m=n=lane_lo, k=8*lane_hi+ele.
 #pragma unroll
     for (int ele = 0; ele < 8; ++ele) {
-        a_temp[ele] = A[8 * lane_hi + 16 * lane_lo + ele];
-        b_temp[ele] = B[8 * lane_hi + 16 * lane_lo + ele];
+        const int k = 8 * lane_hi + ele;
+        a_temp[ele] = A[k * 16 + lane_lo];
+        b_temp[ele] = B[k * 16 + lane_lo];
     }
 
     __syncthreads();
@@ -106,8 +109,8 @@ static int32_t sx_i4(int8_t x)
     return v;
 }
 
-static void cpu_gemm_i4_i32(const std::vector<int8_t>& A_rm,
-                            const std::vector<int8_t>& B_cm,
+static void cpu_gemm_i4_i32(const std::vector<int8_t>& A_cm,
+                            const std::vector<int8_t>& B_rm,
                             const std::vector<int32_t>& C_rm,
                             std::vector<int32_t>& D_rm)
 {
@@ -116,8 +119,8 @@ static void cpu_gemm_i4_i32(const std::vector<int8_t>& A_rm,
         for (int n = 0; n < N; n++) {
             int64_t acc = C_rm[m * N + n];
             for (int k = 0; k < N; k++) {
-                int32_t a = sx_i4(A_rm[m * N + k]);
-                int32_t b = sx_i4(B_cm[k + n * N]);
+                int32_t a = sx_i4(A_cm[k * N + m]);
+                int32_t b = sx_i4(B_rm[k * N + n]);
                 acc += (int64_t)a * b;
             }
             D_rm[m * N + n] = (int32_t)acc;
@@ -149,13 +152,13 @@ int main()
         return (int8_t)v;
     };
 
-    for (int m = 0; m < N; m++) {
-        for (int k = 0; k < N; k++)
-            h_A[m * N + k] = clamp_i4((m * N + k) % 13 - 6);
+    for (int k = 0; k < N; k++) {
+        for (int m = 0; m < N; m++)
+            h_A[k * N + m] = clamp_i4((m * N + k) % 13 - 6);
     }
     for (int k = 0; k < N; k++) {
         for (int n = 0; n < N; n++)
-            h_B[k + n * N] = clamp_i4((k * N + n) % 11 - 5);
+            h_B[k * N + n] = clamp_i4((k * N + n) % 11 - 5);
     }
     h_C[0]  = 3;
     h_C[17] = -2;

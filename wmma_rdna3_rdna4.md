@@ -95,7 +95,7 @@ For FP32 C and D (accumulator), the thirty-two threads fill a 16×16 output tile
 
 Reading left to right, `__builtin_amdgcn_wmma_f32_16x16x16_f16_w32` means: `f32` is the `C`/`D` (accumulator / result) element type, `16x16x16` is the WMMA tile shape (M×N×K), `f16` is the `A`/`B` input element type, and `_w32` / `_w64` is the wave mode. Integer variants swap the type fields (e.g. `i32_16x16x16_iu8`) and add control bits (`neg_a`, `neg_b`, `clamp`). 
 
-For FP32 accumulator (e.g. `f32_16x16x16_f16`, `f32_16x16x16_bf16`), Clang expects three arguments — no `OPSEL`:
+For FP32 accumulator (e.g. `f32_16x16x16_f16`, `f32_16x16x16_bf16`), Clang expects only three arguments:
 
 ```c
 D_frag = __builtin_amdgcn_wmma_f32_16x16x16_<AB_type>_w<32|64>(
@@ -109,13 +109,15 @@ D_frag = __builtin_amdgcn_wmma_f16_16x16x16_f16_w<32|64>(
     A_frag, B_frag, C_frag, OPSEL);
 ```
 
-Integer WMMA variants take `neg_a` / `neg_b` / `clamp` and packed operands. `i32_16x16x16_iu8` uses `int32x4` (`__builtin_bit_cast` from 16×`int8` ,see the sample code in [Composable Kernel](https://github.com/ROCm/composable_kernel/blob/develop/include/ck/utility/amd_wmma.hpp#L127-L137)). `i32_16x16x16_iu4` uses `int32x2` (16 int4 nibbles in two `int32`s; `__builtin_amdgcn_wmma_i32_16x16x16_iu4_w32`). CK uses `neg_a` and `neg_b` both `true` for Wave32 iu8; iu4 matches that in [`builtin_wmma_naive_selector` (int4 path)](https://github.com/ROCm/composable_kernel/blob/develop/test/wmma_op/wmma_op_util.hpp#L84-L96) when built with `CK_EXPERIMENTAL_BIT_INT_EXTENSION_INT4`. Operand gather for both follows the [`matmul code`](https://github.com/ROCm/composable_kernel/blob/develop/test/wmma_op/wmma_op_util.hpp#L98-L192) kernel, not FP16-style direct global loads. Developers can refer these sample codes in your projects. 
+Integer WMMA variants take `neg_a` / `neg_b` / `clamp` and packed operands. `i32_16x16x16_iu8` uses `int32x4` (`__builtin_bit_cast` from 16×`int8` ,see the sample code in [Composable Kernel](https://github.com/ROCm/composable_kernel/blob/develop/include/ck/utility/amd_wmma.hpp#L127-L137)). `i32_16x16x16_iu4` uses `int32x2` (16 int4 nibbles in two `int32`s; `__builtin_amdgcn_wmma_i32_16x16x16_iu4_w32`). CK uses `neg_a` and `neg_b` both `true` for Wave32 iu8; iu4 matches that in [`builtin_wmma_naive_selector`](https://github.com/ROCm/composable_kernel/blob/develop/test/wmma_op/wmma_op_util.hpp#L84-L96) when built with `CK_EXPERIMENTAL_BIT_INT_EXTENSION_INT4`. Operand staging follows the [`matmul code`](https://github.com/ROCm/composable_kernel/blob/develop/test/wmma_op/wmma_op_util.hpp#L98-L192) shared-memory swizzle, not FP16-style direct global loads. Composable Kernel’s WMMA op test stores **A row-major M×K** and **B column-major K×N** in global memory; this repo’s **`samples/wmma_rdna3_iu8.cpp`** and **`samples/wmma_rdna3_iu4.cpp`** instead store **A column-major** (`A[m,k]` at `k*16+m`) and **B row-major** (`B[k,n]` at `k*16+n`) like the FP16 sample, and map global loads so the bytes written to shared memory match CK’s staging. Developers can refer to these sample codes in their projects. 
 
 ### Example: FP16 Input, FP32 Output (Wave32, RDNA 3)
 
-Below is a complete, self-contained HIP program: a 16×16×16 GEMM with FP16 inputs and FP32 accumulators using RDNA 3 WMMA intrinsics, plus a host CPU reference (`cpu_gemm_16x16_ref`) that recomputes `D = A×B + C` in higher precision so you can print max absolute error versus the GPU result.
+This example implemented a 16×16×16 GEMM with FP16 inputs and FP32 accumulators using RDNA 3 WMMA intrinsics, plus a host CPU reference to check the GPU result.
 
-Compile and run (requires ROCm ≥ 5.4 and an RDNA 3 GPU). Run the following from the repository root (the parent of `samples/`):
+The device kernel function loads 16-wide FP16 fragments for A and B, an 8-float piece of C per thread (split across the two 16-lane halves of the wave), then calls wmma intrinsic and stores reslutes to D.
+
+It has neem tested on ROCm 7.2 and an RDNA 3 GPU.
 
 ```bash
 hipcc --offload-arch=gfx1100 samples/wmma_rdna3_fp16.cpp -o wmma_rdna3_fp16
@@ -125,7 +127,7 @@ hipcc --offload-arch=gfx1100 samples/wmma_rdna3_fp16.cpp -o wmma_rdna3_fp16
 
 ### Example: INT8 input, INT32 output (Wave32, RDNA 3)
 
-`i32_16x16x16_iu8` does not use the same direct global loads as `f32_16x16x16_f16`. Match Composable Kernel’s WMMA op test: A row-major M×K, B column-major K×N, the shared-memory swizzle in [`matmul`](https://github.com/ROCm/composable_kernel/blob/develop/test/wmma_op/wmma_op_util.hpp#L98-L192), then `__builtin_amdgcn_wmma_i32_16x16x16_iu8_w32` with `neg_a` and `neg_b` both `true` (as in [`builtin_wmma_naive_selector<int8x16_t,…>`](https://github.com/ROCm/composable_kernel/blob/develop/test/wmma_op/wmma_op_util.hpp#L72-L82)). C/D use the same `lane` / `wave2` pattern as the FP32 accumulator example. Host reference: `int64_t` multiply-add, `int32_t` result.
+The INT8 WMMA path does not mirror the FP16-input case’s simple pattern of loading full operands straight from global memory into fragments. In **`samples/wmma_rdna3_iu8.cpp`**, **A** is stored column-major (**M×K**), **B** row-major (**K×N**), and **C**/**D** row-major (**M×N**). Each thread first reads eight adjacent 8-bit values from **A** and **B** using a lane-dependent pattern (two halves of the wave cover complementary strips along **K** for a fixed row of **A** and column of **B**). Those values are written to shared memory and permuted with the same swizzle as Composable Kernel’s [`matmul`](https://github.com/ROCm/composable_kernel/blob/develop/test/wmma_op/wmma_op_util.hpp#L98-L192) helper before the wave issues the RDNA 3 Wave32 iu8 WMMA builtin with both operand-negate flags set, as in [`builtin_wmma_naive_selector` for 8-bit operands](https://github.com/ROCm/composable_kernel/blob/develop/test/wmma_op/wmma_op_util.hpp#L72-L82). Composable Kernel’s WMMA op test still uses **A** row-major and **B** column-major in global memory; this sample’s layout is an equivalent choice: after staging, the wave sees the same operand bytes as in CK’s pipeline. **C** and **D** use the same accumulator layout as the FP16-input / FP32-output example—two threads per output column, splitting even and odd rows. The host reference multiplies and accumulates with wider integer range, then rounds the final tile to 32-bit integers for comparison.
 
 Source file: `samples/wmma_rdna3_iu8.cpp`.
 
@@ -142,7 +144,7 @@ With the sample data above, the max absolute difference should be `0` if the GPU
 
 ### Example: INT4 input, INT32 output (Wave32, RDNA 3)
 
-Same shared-memory operand path as `samples/wmma_rdna3_iu8.cpp`. Matrices are stored as `int8_t` with each value in the signed int4 range `[-8, 7]` (low four bits matter for packing). Each lane’s `int8x16` fragment is packed into `int32x2` before `__builtin_amdgcn_wmma_i32_16x16x16_iu4_w32`. If your hardware disagrees with the nibble order in `pack_iu4_x16`, adjust packing to match your Clang/ISA reference.
+The INT4 walkthrough in **samples/wmma_rdna3_iu4.cpp** reuses the same big picture as the INT8 sample: **A** is column-major (**M×K**), **B** row-major (**K×N**), **C** and **D** row-major (**M×N**); operands still pass through the same shared-memory reordering and the same style of integer WMMA with negate flags. What changes is precision: **A** and **B** are held in ordinary byte arrays, but each matrix entry is really a **4-bit signed** value (−8 through 7). Only the **lower four bits** of each byte are used when operands are packed; the upper four bits should be treated as unused padding. Each lane first gathers sixteen such 4-bit values (still represented as sixteen bytes in registers), then the sample **packs those sixteen nibbles into two 32-bit chunks** in a specific order before issuing the RDNA 3 Wave32 INT4 WMMA. If your chip or compiler expects a different nibble order inside those two words, adjust the packing step so it agrees with Clang and the ISA reference.
 
 Source file: `samples/wmma_rdna3_iu4.cpp`.
 
@@ -152,15 +154,12 @@ hipcc --offload-arch=gfx1100 -std=c++20 samples/wmma_rdna3_iu4.cpp -o wmma_rdna3
 ./wmma_rdna3_iu4
 ```
 
-With the sample data above, the max absolute difference should be `0` if the GPU path matches the integer reference and the nibble packing matches the hardware.
-
 ### Example: FP16 input, FP16 / BF16 accumulators (Wave32, RDNA 3)
 
-The program above keeps C and D as FP32 tiles. RDNA 3 also exposes WMMA variants with packed FP16 or BF16 accumulators. Those intrinsics take a fourth argument `OPSEL`: `false` selects the lower 16 bits of each 32-bit VGPR slot for the FP16/BF16 matrix values, `true` the upper half ([GPUOpen — WMMA on RDNA 3](https://gpuopen.com/learn/wmma_on_rdna3)).
+The earlier samples keep **C** and **D** as full FP32 tiles. RDNA 3 also offers WMMA variants where the accumulator and result stay in **packed FP16 or BF16**: two half-precision values share each 32-bit register lane. Those builtins add a **fourth selector** after the three operand fragments: one setting uses the **lower 16 bits** of each 32-bit slot for matrix elements, the other uses the **upper 16 bits** ([GPUOpen — WMMA on RDNA 3](https://gpuopen.com/learn/wmma_on_rdna3)).
 
-A/B gathers match the FP32-accum example (A column-major row `m = lane`, B row-major column `n = lane`). C/D use the same 8 logical outputs per lane as before; with `OPSEL == false`, place each matrix element in `c_frag[i*2]` / read `d_frag[i*2]`, and store to `D[(i*2 + threadIdx.x/16)*16 + lane]`.
+Loading **A** and **B** follows the same rules as the FP32-accumulator example: **A** is column-major, each lane responsible for one row index; **B** is row-major, each lane for one column index. **C** and **D** still assign **eight matrix positions per lane**, split between even and odd rows within each output column. When using the “lower 16 bits” mode, each of those eight values occupies the **first half** of its paired register slot; results are read back the same way and written to **D** in row-major order with the same row/column mapping as before.
 
-The host CPU path uses sequential FP16 rounding for the half case (closer to f16 WMMA than a pure FP32 reference). For BF16, buffers are `uint16_t` BF16 bits on the host; the device kernel uses `__bf16` (requires a recent ROCm HIP-Clang). Hardware BF16 accumulation order can differ from a scalar float host loop — expect a looser float-space error than FP16.
 
 ```bash
 hipcc --offload-arch=gfx1100 -O2 samples/wmma_rdna3_f16_bf16_acc.cpp -o wmma_rdna3_f16_bf16_acc
@@ -175,8 +174,8 @@ RDNA 4 introduces 3rd-generation Matrix Cores with several improvements:
 
 | Metric | RDNA 3 | RDNA 4 |
 |--------|--------|--------|
-| FP16 / BF16 FLOPS per clock per CU | 256 | 512 (2×, per AMD arch disclosures; verify per SKU) |
-| INT8 FLOPS per clock per CU | 256 | 1024 (4×, per AMD arch disclosures; verify per SKU) |
+| FP16 / BF16 FLOPS per clock per CU | 256 | 512 (2×) |
+| INT8 FLOPS per clock per CU | 256 | 1024 (4×) |
 | FP8 support | No | Yes (E4M3 / E5M2) |
 | Structured sparsity | No | Yes (4:2, via SWMMAC) |
 | Register duplication | Yes (A/B lanes 16–31) | Eliminated |
@@ -214,7 +213,7 @@ RDNA 4 adds FP8 and BF8 (brain float 8-bit) WMMA instructions:
 | Mixed FP8/BF8| FP32               | `f32_16x16x16_fp8_bf8_w32_gfx12` |
 | INT8         | INT32              | `i32_16x16x16_iu8_w32_gfx12` |
 | INT4         | INT32              | `i32_16x16x16_iu4_w32_gfx12` |
-| INT4         | INT32              | `i32_16x16x32_iu4_w32_gfx12` (larger K); operand layout — ISA PDF / [Matrix Instruction Calculator](https://github.com/ROCm/amd_matrix_instruction_calculator) |
+| INT4         | INT32              | `i32_16x16x32_iu4_w32_gfx12` |
 
 Additionally, SWMMAC (Sparse Wave Matrix Multiply-Accumulate) instructions exploit 4:2 structured sparsity for a further 2× throughput boost.
 
@@ -242,35 +241,7 @@ D_frag = __builtin_amdgcn_wmma_<CD_type>_16x16x16_<AB_type>_w32_gfx12(
 | B (`K×N`) | `n = t % 16`, `k = (t/16)*8 + e` → `b_frag[e] = B[k*ldb+n]` |
 | C / D (`M×N`) | `m = (t/16)*8 + e`, `n = t % 16` → `d_frag[e]` ↔ `D[m*ldd+n]` |
 
-The diagram below is **not** a runtime animation; it is a **Mermaid** flowchart (renders on GitHub, many IDEs, and static-site generators). If you only see a code fence, use the table above.
 
-```mermaid
-flowchart TB
-  subgraph in["Wave32: per-thread inputs"]
-    t["lane t — 0 … 31"]
-    e["fragment index e — 0 … 7"]
-  end
-  lo["lo = t % 16"]
-  k["k = (t / 16) * 8 + e"]
-  mD["m = (t / 16) * 8 + e"]
-  nD["n = lo (output column)"]
-  t --> lo
-  t --> k
-  e --> k
-  t --> mD
-  e --> mD
-  lo --> nD
-
-  A["A column-major: a_frag[e] = A[k*lda + lo]"]
-  B["B row-major: b_frag[e] = B[k*ldb + lo]"]
-  D["D row-major: d_frag[e] ↔ D[m*ldd + n]"]
-  k --> A
-  lo --> A
-  k --> B
-  lo --> B
-  mD --> D
-  nD --> D
-```
 
 **Pitfall:** `t % 16` is the **N** column of the output tile, not **M** — easy to mis-map when porting from CUDA ([ROCm #6025](https://github.com/ROCm/ROCm/issues/6025)).
 

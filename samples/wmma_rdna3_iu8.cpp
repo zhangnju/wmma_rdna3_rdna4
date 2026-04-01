@@ -3,9 +3,10 @@
 //
 // D = A*B + C for 16x16 int8 tiles, int32 accumulators, RDNA 3 Wave32 WMMA.
 //
-// Unlike f32_16x16x16_f16, i32_16x16x16_iu8 expects the operand packing used in
-// Composable Kernel test/wmma_op (matmul kernel): A row-major M×K, B column-major
-// K×N, shared-memory swizzle into fragments, and neg_a/neg_b = true at the builtin.
+// Operand packing matches Composable Kernel test/wmma_op (matmul kernel): shared-memory
+// swizzle into fragments and neg_a/neg_b = true at the builtin. Global layout here is
+// A column-major M×K (A[m,k] at k*16+m), B row-major K×N (B[k,n] at k*16+n); loads map
+// those layouts onto the same staged bytes as CK’s A row-major / B column-major path.
 
 #include <hip/hip_runtime.h>
 #include <algorithm>
@@ -19,8 +20,8 @@ typedef int32_t int32x4 __attribute__((ext_vector_type(4)));
 typedef int32_t int32x8 __attribute__((ext_vector_type(8)));
 
 __global__ void wmma_gemm_rdna3_iu8(
-    const int8_t* __restrict__ A,   // [16 x 16] M×K row-major: A[m,k] at m*16+k
-    const int8_t* __restrict__ B,   // [16 x 16] K×N col-major: B[k,n] at k+16*n
+    const int8_t* __restrict__ A,   // [16 x 16] M×K column-major: A[m,k] at k*16+m
+    const int8_t* __restrict__ B,   // [16 x 16] K×N row-major: B[k,n] at k*16+n
     const int32_t* __restrict__ C,  // [16 x 16] row-major C[m,n] at m*16+n
     int32_t* __restrict__ D)        // [16 x 16] row-major
 {
@@ -33,10 +34,13 @@ __global__ void wmma_gemm_rdna3_iu8(
 
     int8_t a_temp[8];
     int8_t b_temp[8];
+    // Same (m,k) / (k,n) as CK row-major A / col-major B loads, but indexed in
+    // column-major A and row-major B: m=lane_lo, k=8*lane_hi+ele, n=lane_lo.
 #pragma unroll
     for (int ele = 0; ele < 8; ++ele) {
-        a_temp[ele] = A[8 * lane_hi + 16 * lane_lo + ele];
-        b_temp[ele] = B[8 * lane_hi + 16 * lane_lo + ele];
+        const int k = 8 * lane_hi + ele;
+        a_temp[ele] = A[k * 16 + lane_lo];
+        b_temp[ele] = B[k * 16 + lane_lo];
     }
 
     __syncthreads();
@@ -86,9 +90,9 @@ __global__ void wmma_gemm_rdna3_iu8(
     }
 }
 
-// A row-major M×K, B column-major K×N, C/D row-major M×N (same as CK wmma_op TestWmma).
-static void cpu_gemm_i8_i32(const std::vector<int8_t>& A_rm,
-                            const std::vector<int8_t>& B_cm,
+// A column-major M×K, B row-major K×N, C/D row-major M×N.
+static void cpu_gemm_i8_i32(const std::vector<int8_t>& A_cm,
+                            const std::vector<int8_t>& B_rm,
                             const std::vector<int32_t>& C_rm,
                             std::vector<int32_t>& D_rm)
 {
@@ -97,8 +101,8 @@ static void cpu_gemm_i8_i32(const std::vector<int8_t>& A_rm,
         for (int n = 0; n < N; n++) {
             int64_t acc = C_rm[m * N + n];
             for (int k = 0; k < N; k++) {
-                int32_t a = A_rm[m * N + k];
-                int32_t b = B_cm[k + n * N];
+                int32_t a = A_cm[k * N + m];
+                int32_t b = B_rm[k * N + n];
                 acc += (int64_t)a * b;
             }
             D_rm[m * N + n] = (int32_t)acc;
@@ -122,13 +126,13 @@ int main()
     std::vector<int8_t> h_A(sz), h_B(sz);
     std::vector<int32_t> h_C(sz, 0), h_D(sz, 0);
 
-    for (int m = 0; m < N; m++) {
-        for (int k = 0; k < N; k++)
-            h_A[m * N + k] = (int8_t)(((m * N + k) % 7) - 3);
+    for (int k = 0; k < N; k++) {
+        for (int m = 0; m < N; m++)
+            h_A[k * N + m] = (int8_t)(((m * N + k) % 7) - 3);
     }
     for (int k = 0; k < N; k++) {
         for (int n = 0; n < N; n++)
-            h_B[k + n * N] = (int8_t)(((k * N + n) % 5) - 2);
+            h_B[k * N + n] = (int8_t)(((k * N + n) % 5) - 2);
     }
     h_C[0]  = 10;
     h_C[17] = -7;
