@@ -131,16 +131,10 @@ The INT8 WMMA path does not mirror the FP16-input case’s simple pattern of loa
 
 Source file: `samples/wmma_rdna3_iu8.cpp`.
 
-```cpp
-
-```
-
 ```bash
 hipcc --offload-arch=gfx1100 -std=c++20 samples/wmma_rdna3_iu8.cpp -o wmma_rdna3_iu8
 ./wmma_rdna3_iu8
 ```
-
-With the sample data above, the max absolute difference should be `0` if the GPU path matches the integer reference.
 
 ### Example: INT4 input, INT32 output (Wave32, RDNA 3)
 
@@ -196,7 +190,7 @@ RDNA 4 (Wave32) — A/B operands:
   Lanes 0–31: eight unique FP16 values per lane (no mirror)
 ```
 
-Chaining WMMA (e.g. MLP) still needs a layout transform: on gfx12, operand layout for A/B ≠ accumulator layout for D (see formulas below). You normally write D to shared or global memory in row-major form, then reload the next operand with the correct mapping, or use rocWMMA / Composable Kernel. See [ROCm issue #6025](https://github.com/ROCm/ROCm/issues/6025).
+Chaining WMMA (e.g. MLP) still needs a layout transform: on gfx12, the layout used for the A and B operands is not the same as the layout of the D accumulator (see formulas below). You normally write D to shared or global memory in row-major form, then reload the next operand with the correct mapping, or use rocWMMA / Composable Kernel. See [ROCm issue #6025](https://github.com/ROCm/ROCm/issues/6025).
 
 ### New Data Types in RDNA 4
 
@@ -219,9 +213,9 @@ Additionally, SWMMAC (Sparse Wave Matrix Multiply-Accumulate) instructions explo
 
 ### RDNA 4 Intrinsic Syntax
 
-Compared to RDNA 3, gfx12 **drops `OPSEL`** for **packed FP16 and BF16 accumulator** results (e.g. `f16_16x16x16_f16_*`, `bf16_16x16x16_bf16_*`): the output is always densely packed. RDNA 3 **`f32_16x16x16_*`** was already three-argument with no `OPSEL`.
+Compared to RDNA 3, gfx12 drops `OPSEL` for packed FP16 and BF16 accumulator results (e.g. `f16_16x16x16_f16_*`, `bf16_16x16x16_bf16_*`): the output is always densely packed. 
 
-For the **floating-point WMMA** family (FP16 / BF16 / FP8 inputs with FP16, BF16, or FP32 accumulators, and the usual **16×16×16** tile encoded in the name), the Wave32 pattern is:
+For the floating-point WMMA family, the Wave32 pattern is:
 
 ```c
 D_frag = __builtin_amdgcn_wmma_<CD_type>_16x16x16_<AB_type>_w32_gfx12(
@@ -231,26 +225,36 @@ D_frag = __builtin_amdgcn_wmma_<CD_type>_16x16x16_<AB_type>_w32_gfx12(
 );
 ```
 
-**Integer** WMMA (`iu8`, `iu4`) does **not** use the three-operand float pattern: Clang’s gfx12 builtins take **`neg_a` / `neg_b` / `clamp` (`i1`) and packed A/B** plus the accumulator (**six arguments** in practice — see Clang’s [gfx12 WMMA Wave32 codegen test](https://github.com/llvm/llvm-project/blob/main/clang/test/CodeGenOpenCL/builtins-amdgcn-gfx12-wmma-w32.cl), e.g. `__builtin_amdgcn_wmma_i32_16x16x16_iu8_w32_gfx12`, `…_16x16x16_iu4_…`, `…_16x16x32_iu4_…`). The **numeric triple** in the middle of the name (`16x16x16` vs `16x16x32`, …) encodes the hardware tile shape; map it to matrix dimensions using the **RDNA4 ISA PDF** / [Matrix Instruction Calculator](https://github.com/ROCm/amd_matrix_instruction_calculator).
+For the integer type WMMA family, the builtin name always uses int32 data type for the accumulator. A Wave32 call passes 6 arguments in this order: `negate A` (boolean), `packed A`, `negate B` (boolean), `packed B`, C accumulator, `clamp result` (boolean). Those booleans are what Clang/LLVM calls `i1`. Packed here means each lane’s A and B carry several 8- or 4-bit matrix elements inside one or two int32 registers, instead of FP WMMA’s usual pattern (eight half floats per lane) in one vector for A and again for B.
 
-**FP16 → FP32** on gfx12 Wave32: `__builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12(half8_t, half8_t, float8_t)` — **8** `half` elements per lane for A/B (not 16). With A column-major (`A[k*lda+m]`), B row-major (`B[k*ldb+n]`), D row-major (`D[m*ldd+n]`), lane `t` and `e ∈ [0,8)` (Composable Kernel–style layout):
+```c
+D_frag = __builtin_amdgcn_wmma_i32_16x16x16_iu8_w32_gfx12(
+    neg_a, A_frag,   // i1, then packed UINT8 A (<2 x i32> per lane)
+    neg_b, B_frag,   // i1, then packed UINT8 B (<2 x i32> per lane)
+    C_frag,          // <8 x i32> accumulator
+    clamp            // i1: saturate / clamp result
+);
 
-| Tile | Gather / scatter |
-|------|------------------|
-| A (`M×K`) | `m = t % 16`, `k = (t/16)*8 + e` → `a_frag[e] = A[k*lda+m]` |
-| B (`K×N`) | `n = t % 16`, `k = (t/16)*8 + e` → `b_frag[e] = B[k*ldb+n]` |
-| C / D (`M×N`) | `m = (t/16)*8 + e`, `n = t % 16` → `d_frag[e]` ↔ `D[m*ldd+n]` |
+// 16×16×16 INT4: one i32 of packed nibbles per lane for A and B
+D_frag = __builtin_amdgcn_wmma_i32_16x16x16_iu4_w32_gfx12(
+    neg_a, A_i32, neg_b, B_i32, C_frag, clamp);
 
-
-
-**Pitfall:** `t % 16` is the **N** column of the output tile, not **M** — easy to mis-map when porting from CUDA ([ROCm #6025](https://github.com/ROCm/ROCm/issues/6025)).
+// 16×16×32 INT4: <2 x i32> packed operands per lane (wider K)
+D_frag = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
+    neg_a, A_frag, neg_b, B_frag, C_frag, clamp);
+```
 
 ### Example 1: FP16 Input, FP32 Output (Wave32, RDNA 4)
 
-This matches the RDNA 3 example (same memory layouts) but uses `half8_t` / `float8_t` operands, the `_gfx12` suffix, no `OPSEL`, and the lane formulas in the table / Mermaid diagram above for loads and stores. `main` again compares against the same CPU reference GEMM and prints max abs error.
+This example implements a 16×16×16 tile GEMM `D = A×B + C` with FP16 inputs and FP32 accumulators using RDNA 4 (gfx12) WMMA intrinsics, plus a host CPU reference to verify the GPU result—same problem shape as **`samples/wmma_rdna3_fp16.cpp`**, but with the Wave32 register map and builtin names for GFX12.
 
+The device kernel `wmma_gemm_rdna4` launches one block of 32 threads (one wave). Each lane first gathers eight half-precision values into `half8_t` fragments for A and B using the gfx12 lane indexing (the low part of the lane id picks the M row for A and the N column for B; lanes 0-15 cover K=0-7, lanes 16-31 cover K=8-15, and index e chooses one value inside that 8-value K range). It then loads eight floats of C per lane—the accumulator layout matches D, with the eight slots walking M within the tile and the lane id modulo 16 picking N. The kernel calls `__builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12`, then writes D with the same scatter pattern as C. There is no `OPSEL` argument and no duplicate A/B lanes: every lane contributes distinct operand data, unlike RDNA 3.
 
-Compile and run (requires ROCm ≥ 6.2 and an RDNA 4 GPU, e.g., RX 9070 XT):
+On the host, `cpu_gemm_16x16_ref` recomputes the tile in `long double` for a tight numerical check, compares against the GPU D, prints sample and max absolute error, and returns a non-zero exit code if max error exceeds 1e-2.
+
+Source file: `samples/wmma_rdna4_fp16.cpp`.
+
+It has been tested on ROCm 7.2 and an RDNA 4 GPU (e.g. RX 9070 XT).
 
 ```bash
 hipcc --offload-arch=gfx1201 samples/wmma_rdna4_fp16.cpp -o wmma_rdna4_fp16
@@ -259,38 +263,70 @@ hipcc --offload-arch=gfx1201 samples/wmma_rdna4_fp16.cpp -o wmma_rdna4_fp16
 
 ### Example 2: FP8 Input, FP32 Output (RDNA 4 Only)
 
-FP8 (E4M3) WMMA is exclusive to RDNA 4. For gfx12 Wave32, operands are 8 packed FP8 bytes per lane (`int32x2` bit pattern passed to the builtin, same m/k/n gather as the FP16 example). **`samples/wmma_rdna4_fp8.cpp`** is a complete program: host fills `uint8_t` tiles via **`__hip_fp8_e4m3`** (`hip_fp8.h`, OCP E4M3), runs **`cpu_gemm_fp8_ref`** with `long double` accumulation after **`fp8_storage_to_float`**, launches the kernel with FP32 **`C`**, prints max abs error vs GPU, and exits non‑zero if error exceeds a loose FP8 threshold.
+This example implements the same 16×16×16 fused multiply-add D = A×B + C with FP32 C/D, but A and B are stored as raw E4M3 FP8 bytes. FP8 WMMA exists only on RDNA 4.
+
+The device kernel `wmma_gemm_rdna4_fp8` uses `pack_fp8_A_col` and `pack_fp8_B_row` to collect eight FP8 bytes per lane from global memory with the same (m, k) and (k, n) indexing as the FP16 sample, then packs them into `int32x2` (a small union of two 32-bit words and eight bytes) for `__builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8_w32_gfx12`. C load and D store follow the same eight-float-per-lane accumulator map as `wmma_rdna4_fp16.cpp`.
+
+Source file: **`samples/wmma_rdna4_fp8.cpp`**.
+
+It has been tested on ROCm 7.2 and an RDNA 4 GPU (e.g. RX 9070 XT).
 
 ```bash
 hipcc --offload-arch=gfx1201 samples/wmma_rdna4_fp8.cpp -o wmma_rdna4_fp8
 ./wmma_rdna4_fp8
 ```
 
-### Example 3: Chained WMMA for MLP Inference (RDNA 4)
+### Example 3: INT8 Input, INT32 Output (Wave32, RDNA 4)
 
-On gfx12, D’s accumulator layout ≠ B’s operand layout, so you cannot reuse the first WMMA’s register output as the second WMMA’s B fragment without reordering. A small shared-memory staging step (store row-major, reload with the B gather above) is typical. **`samples/mlp_wmma_rdna4.cpp`** implements `output = W2 * relu(W1 * input)` on 16×16 tiles: two `_gfx12` WMMAs, **`relu` in FP32**, hidden tile written to **`__half` shared memory** (matching the second layer’s FP16 B operand), and a host **`cpu_mlp_ref`** that mirrors the same steps (`long double` GEMMs, `relu`, **`__float2half`** before the second multiply). The kernel uses a **fresh zero accumulator** for the second WMMA (`acc1`), not the variable passed to the first WMMA.
+This example implements D = A×B + C on a 16×16×16 tile with INT8 A/B and INT32 C/D, analogous to `samples/wmma_rdna3_iu8.cpp` but calling the gfx12 six-argument iu8 WMMA instead of the RDNA 3 path.
+
+Unlike FP16 gfx12, iu8 operands are not a simple global gather per lane: the kernel repeats the same shared-memory swizzle as RDNA 3 to build `int8x16` A/B fragments, then splits them for gfx12 — threads 0–15 use bytes `[0..7]`, threads 16–31 use `[8..15]` — and `__builtin_bit_cast` those eight bytes to `int32x2`. C load and D store use the gfx12 accumulator map (same as `wmma_rdna4_fp16.cpp`). The builtin is `__builtin_amdgcn_wmma_i32_16x16x16_iu8_w32_gfx12`; the first two `bool` arguments are signedness (`true` = signed int8), not negation, with `clamp` `false`.
+
+Source file: **`samples/wmma_rdna4_iu8.cpp`**. Compile with **C++20** so **`__builtin_bit_cast`** is available.
+
+It has been tested on ROCm 7.2 and an RDNA 4 GPU (e.g. RX 9070 XT).
+
+```bash
+hipcc --offload-arch=gfx1201 -std=c++20 samples/wmma_rdna4_iu8.cpp -o wmma_rdna4_iu8
+./wmma_rdna4_iu8
+```
+
+### Example 4: INT4 Input, INT32 Output (Wave32, RDNA 4)
+
+`samples/wmma_rdna4_iu4.cpp` runs two GPU checks (K = 16 and K = 32) for D = A×B + C: int4 in the low nibble of `int8_t`, int32 C/D, same idea as `wmma_rdna3_iu4.cpp`. `main` returns 0 only if both checks match the CPU.
+
+The K = 16 path packs eight nibbles per lane into one `int32` (`pack_iu4_x8`) and calls `__builtin_amdgcn_wmma_i32_16x16x16_iu4_w32_gfx12`. The K = 32 path uses A as 16×32 and B as 32×16 (reduction length K = 32), packs sixteen nibbles per lane into `int32x2` with `pack_iu4_x16`, and calls `__builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12`. C/D use the same gfx12 accumulator layout as the FP16 samples; `neg_a` / `neg_b` are true, `clamp` false.
+
+Host reference: `cpu_gemm_i4_i32` with `sx_i4`, same as `wmma_rdna3_iu4.cpp`.
+
+It has been tested on ROCm 7.2 and an RDNA 4 GPU (e.g. RX 9070 XT).
+
+```bash
+hipcc --offload-arch=gfx1201 -std=c++20 samples/wmma_rdna4_iu4.cpp -o wmma_rdna4_iu4
+./wmma_rdna4_iu4
+```
+
+### Example 5: Chained WMMA for MLP Inference (RDNA 4)
+
+On gfx12, the D accumulator layout is not the same as the B operand layout, so you cannot reuse the first WMMA’s register output as the second WMMA’s B fragment without reordering. A small shared-memory staging step (store row-major, reload with the B gather above) is typical. **`samples/mlp_wmma_rdna4.cpp`** implements `output = W2 * relu(W1 * input)` on 16×16 tiles: two `_gfx12` WMMAs, **`relu` in FP32**, hidden tile written to **`__half` shared memory** (matching the second layer’s FP16 B operand). The kernel uses a fresh zero accumulator for the second WMMA (`acc1`), not the variable passed to the first WMMA.
 
 ```bash
 hipcc --offload-arch=gfx1201 samples/mlp_wmma_rdna4.cpp -o mlp_wmma_rdna4
 ./mlp_wmma_rdna4
 ```
 
----
-
 ## Using the Higher-Level rocWMMA Library
 
 For applications that don't need to hand-tune intrinsic-level code, AMD provides rocWMMA — a C++ template library with an interface modeled after CUDA's `nvcuda::wmma` API. It handles register layout management automatically and supports both RDNA and CDNA architectures.
 
-**`samples/rocwmma_example.cpp`** is a full HIP program: one 16×16×16 tile with `fragment<matrix_a, …, col_major>`, `fragment<matrix_b, …, row_major>`, FP32 accumulator, **`D = A*B + C`** with a non-zero **`C`** buffer (same layout as `samples/wmma_rdna4_fp16.cpp`), host **`cpu_gemm_16x16_ref`** with `long double` accumulation, and max-abs error printing. The launch queries **`hipGetDeviceProperties` → `warpSize`** so the block matches the device wavefront (**32** on RDNA, **64** on typical CDNA).
+`samples/rocwmma_example.cpp` is a full HIP program: one 16×16×16 tile with `fragment<matrix_a, …, col_major>`, `fragment<matrix_b, …, row_major>`, FP32 accumulator, `D = A*B + C` with a non-zero **`C`** buffer (same layout as `samples/wmma_rdna4_fp16.cpp`). 
 
-**rocWMMA 7.x note:** loading the accumulator from global memory requires an explicit layout on the `load_matrix_sync` overload, e.g. **`load_matrix_sync(c_frag, C, ld, mem_row_major)`** — the older three-argument form is not enough when `c_frag` has no static layout in the type.
+**rocWMMA 7.x note:** loading the accumulator from global memory requires an explicit layout on the `load_matrix_sync` overload, e.g. `load_matrix_sync(c_frag, C, ld, mem_row_major)` — the older three-argument form is not enough when `c_frag` has no static layout in the type.
 
 ```bash
 hipcc --offload-arch=native samples/rocwmma_example.cpp -o rocwmma_example
 ./rocwmma_example
 ```
-
----
 
 ## Scaling Up: Tiled GEMM Beyond 16×16
 
@@ -308,7 +344,7 @@ for each output tile (bm, bn):
 
 In HIP, each thread block typically handles one or more output tiles, and each wavefront within the block is assigned exactly one WMMA operation per step.
 
-**`samples/tiled_gemm_rdna4.cpp`** implements **`D = A * B`** for **`M×K`** `__half` **A** (column-major, stride `lda`), **`K×N`** **B** (row-major, `ldb`), **`M×N`** FP32 **D** (row-major, `ldd`), with **`M, N, K` multiples of 16**. Each block covers one 16×16 output tile: **`grid(N/16, M/16)`**, **`block(32)`**. The self-check requires **`max abs error < 1e-3`** vs a **FP32 CPU GEMM** that steps **`K` in chunks of 16** with **`fmaf`** (closer to the WMMA schedule than a single long loop). Test inputs include a small **`DATA_SCALE`** so large sizes (e.g. **1024³**) still satisfy the strict bound. Optional **`M N K`** CLI args; default **32×32×32**.
+`samples/tiled_gemm_rdna4.cpp` implements `D = A * B` for `M×K` `__half` A (column-major, stride `lda`), `K×N` B (row-major, `ldb`), `M×N` FP32 D (row-major, `ldd`), with `M, N, K` multiples of 16. Each block covers one 16×16 output tile: `grid(N/16, M/16)`, `block(32)`. Optional `M N K` CLI args; default `32×32×32`.
 
 ```bash
 hipcc --offload-arch=gfx1201 samples/tiled_gemm_rdna4.cpp -o tiled_gemm_rdna4
@@ -392,12 +428,12 @@ Output includes: opcode, VGPR count, element mapping per lane, and peak throughp
 
 ## Summary
 
-WMMA brings hardware matrix acceleration to AMD's consumer GPU line, enabling significant AI and compute performance gains without requiring a datacenter GPU. RDNA 3 introduced the foundation with FP16/BF16/INT8 support; RDNA 4 doubles down with higher throughput, a cleaner operand layout without mirror lanes, and new FP8 data types opening the door to ultra-low-precision inference. Chained WMMA still needs explicit layout transforms unless you use rocWMMA / CK.
+WMMA brings hardware matrix acceleration to AMD's consumer GPU line, enabling significant AI and compute performance gains without requiring a datacenter GPU. RDNA 3 introduced the foundation with FP16/BF16/INT8 support; RDNA 4 doubles down with higher throughput, a cleaner operand layout without mirror lanes, and new FP8 data types opening the door to ultra-low-precision inference. 
 
 When writing WMMA code:
 
 1. RDNA 3: use `__builtin_amdgcn_wmma_*_w32` or `*_w64` intrinsics; account for lane duplication in A/B.
-2. RDNA 4: use `__builtin_amdgcn_wmma_*_w32_gfx12` (or `*_w64_gfx12`) with `half8_t` / `float8_t` and the m/k/n lane formulas above for loads and stores; add FP8 / SWMMAC where applicable.
+2. RDNA 4: use `__builtin_amdgcn_wmma_*_w32_gfx12` (or `*_w64_gfx12`) with `half8_t` / `float8_t` and the m/k/n lane formulas above for loads and stores; add FP8 / SWMMAC where applicable. **iu8** uses six-argument builtins with `int32x2`-packed **A/B** per lane (`samples/wmma_rdna4_iu8.cpp`); **iu4** uses **scalar `int32`** **A/B** for **`…_16x16x16_iu4_…`** and **`int32x2`** for **`…_16x16x32_iu4_…`** (`samples/wmma_rdna4_iu4.cpp`).
 3. Both: consider rocWMMA for portable, maintainable code.
 
 ---
@@ -406,7 +442,6 @@ When writing WMMA code:
 
 - [How to accelerate AI applications on RDNA 3 using WMMA — AMD GPUOpen](https://gpuopen.com/learn/wmma_on_rdna3/)
 - [Using the Matrix Cores of AMD RDNA 4 architecture GPUs — AMD GPUOpen](https://gpuopen.com/learn/using_matrix_core_amd_rdna4/)
-- [Matrix Core Programming on AMD CDNA3 and CDNA4 — AMD ROCm Blog](https://rocm.blogs.amd.com/software-tools-optimization/matrix-cores-cdna/README.html)
 - [AMD Matrix Instruction Calculator — GitHub](https://github.com/ROCm/amd_matrix_instruction_calculator)
 - [rocWMMA Programming Guide — ROCm Documentation](https://rocm.docs.amd.com/projects/rocWMMA/en/latest/conceptual/programmers-guide.html)
 - [RDNA3 ISA Reference Guide — AMD](https://www.amd.com/content/dam/amd/en/documents/radeon-tech-docs/instruction-set-architectures/rdna3-shader-instruction-set-architecture-feb-2023_0.pdf)
