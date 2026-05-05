@@ -1,5 +1,24 @@
 // wmma_rdna4_fp16.cpp
 // Compile (repo root): hipcc --offload-arch=gfx1201 samples/wmma_rdna4_fp16.cpp -o wmma_rdna4_fp16
+//
+// GFX12 (RDNA 4) accumulator lane mapping — Wave32, 16×16×16 FP16→FP32:
+//
+//   A/B operands (8 elements per lane):
+//     mn     = lane % 16          → row index for A, col index for B
+//     k      = (lane / 16)*8 + e  → K offset, e = 0..7
+//     A column-major: A[k * 16 + mn]
+//     B row-major:    B[k * 16 + mn]
+//
+//   C/D accumulator (8 floats per lane):
+//     col  = lane % 16            → N column index (fast-varying across lanes)
+//     row  = (lane / 16)*8 + j   → M row index,   j = 0..7
+//     C/D row-major: C[row * 16 + col]
+//
+//   In VGPR notation: VGPR[lane][j] = matrix[(lane/16)*8 + j][lane%16]
+//
+//   SubGroup breakdown (Wave32):
+//     Lanes  0–15 (SubGroup 0): col 0–15, rows 0–7,  K = 0–7
+//     Lanes 16–31 (SubGroup 1): col 0–15, rows 8–15, K = 8–15
 
 #include <hip/hip_runtime.h>
 #include <hip/hip_fp16.h>
@@ -19,15 +38,19 @@ __global__ void wmma_gemm_rdna4(
 {
     const int lane = threadIdx.x;  // 0–31
 
+    // A/B operands: mn = lane%16 selects the row (A) / col (B) index;
+    // k = (lane/16)*8 + e walks 8 K-values assigned to this lane's half-wave.
     half8_t a_frag, b_frag;
     #pragma unroll
     for (int e = 0; e < 8; e++) {
-        const int mn = lane % 16;  // m for A, n for B (same lane id here)
+        const int mn = lane % 16;
         const int k = (lane / 16) * 8 + e;
-        a_frag[e] = (_Float16)A[k * 16 + mn];
-        b_frag[e] = (_Float16)B[k * 16 + mn];
+        a_frag[e] = (_Float16)A[k * 16 + mn];  // column-major
+        b_frag[e] = (_Float16)B[k * 16 + mn];  // row-major
     }
 
+    // C/D accumulator: col = lane%16, row = (lane/16)*8 + j for j=0..7.
+    // Slot j holds matrix element at [row][col] in row-major storage.
     float8_t c_frag;
     #pragma unroll
     for (int e = 0; e < 8; e++) {
@@ -39,6 +62,7 @@ __global__ void wmma_gemm_rdna4(
     float8_t d_frag = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12(
         a_frag, b_frag, c_frag);
 
+    // Scatter D using the same lane→(row,col) mapping as C.
     #pragma unroll
     for (int e = 0; e < 8; e++) {
         const int m = (lane / 16) * 8 + e;

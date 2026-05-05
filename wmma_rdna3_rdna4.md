@@ -257,7 +257,48 @@ D_frag = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
 
 This example implements a 16×16×16 tile GEMM `D = A×B + C` with FP16 inputs and FP32 accumulators using RDNA 4 (gfx12) WMMA intrinsics, plus a host CPU reference to verify the GPU result—same problem shape as **`samples/wmma_rdna3_fp16.cpp`**, but with the Wave32 register map and builtin names for GFX12.
 
-The device kernel `wmma_gemm_rdna4` launches one block of 32 threads (one wave). Each lane first gathers eight half-precision values into `half8_t` fragments for A and B using the gfx12 lane indexing (the low part of the lane id picks the M row for A and the N column for B; lanes 0-15 cover K=0-7, lanes 16-31 cover K=8-15, and index e chooses one value inside that 8-value K range). It then loads eight floats of C per lane—the accumulator layout matches D, with the eight slots walking M within the tile and the lane id modulo 16 picking N. The kernel calls `__builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12`, then writes D with the same scatter pattern as C. There is no `OPSEL` argument and no duplicate A/B lanes: every lane contributes distinct operand data, unlike RDNA 3.
+#### GFX12 Lane Mapping
+
+The gfx12 accumulator uses a *column-distributed tile* layout. In VGPR notation:
+
+```
+VGPR[lane][j] = matrix[(lane / 16) * 8 + j][lane % 16]
+```
+
+| Component | Meaning |
+|-----------|---------|
+| `lane % 16` | **Column index** (fast-varying dimension across lanes) |
+| `(lane / 16) * 8` | Starting row of this lane's row-block |
+| `j` (0–7) | Row offset within the block |
+
+SubGroup breakdown (Wave32):
+
+| SubGroup | Lanes | Columns | Rows | K range |
+|----------|-------|---------|------|---------|
+| SubGroup 0 | 0–15 | 0–15 | 0–7  | 0–7  |
+| SubGroup 1 | 16–31 | 0–15 | 8–15 | 8–15 |
+
+This gives the following load/store formulas used in the kernel:
+
+```cpp
+// A/B operands — 8 elements per lane
+const int mn = lane % 16;           // row index for A, col index for B
+const int k  = (lane / 16) * 8 + e; // K offset, e = 0..7
+a_frag[e] = A[k * 16 + mn];         // A column-major
+b_frag[e] = B[k * 16 + mn];         // B row-major
+
+// C/D accumulator — 8 floats per lane
+const int col = lane % 16;
+const int row = (lane / 16) * 8 + e;
+c_frag[e] = C[row * 16 + col];      // row-major load
+D[row * 16 + col] = d_frag[e];      // row-major store
+```
+
+> **Common pitfall:** `lane % 16` maps to the **column**, not the row. Writing `row = lane % 16` causes a silent transpose — the exact mistake documented in [ROCm issue #6025](https://github.com/ROCm/ROCm/issues/6025).
+
+#### Kernel Overview
+
+The device kernel `wmma_gemm_rdna4` launches one block of 32 threads (one wave). Each lane gathers eight `_Float16` values into `half8_t` fragments for A and B using the formulas above, loads eight floats of C per lane, calls `__builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12`, then scatters D with the same row/column pattern. There is no `OPSEL` argument and no duplicate A/B lanes — every lane contributes distinct operand data, unlike RDNA 3.
 
 On the host, `cpu_gemm_16x16_ref` recomputes the tile in `long double` for a tight numerical check, compares against the GPU D, prints sample and max absolute error, and returns a non-zero exit code if max error exceeds 1e-2.
 

@@ -345,31 +345,52 @@ for (int j = 0; j < 8; j++) {
 }
 ```
 
-### 示例 0：lane 映射验证（gfx1201，RDNA 4）
-
-本示例专门演示并验证 gfx12 的累加器 lane 映射公式。kernel 用一个 Wave32（32 线程）完成 16×16×16 的 `D = A×B + C`（FP16 输入、FP32 累加），并通过打印采样元素让读者直观看到 `D[row][col]` 与 lane 编号的对应关系。
-
-关键实现要点：
-- **A 操作数**（列主序）：`a_frag[e] = A[k * 16 + mn]`，其中 `mn = lane % 16`，`k = (lane/16)*8 + e`
-- **B 操作数**（行主序）：`b_frag[e] = B[k * 16 + mn]`，与 A 的 `mn`/`k` 下标对称
-- **C/D 累加器**：`out_col = lane % 16`，`out_row0 = (lane/16)*8`，slot `j` 对应矩阵行 `out_row0 + j`
-
-Host 端用 `long double` 重算参考值并逐元素比较，最大误差超过 `1e-2` 时返回非零退出码。
-
-源文件：[`samples/wmma_rdna4_lane_mapping_demo.cpp`](https://github.com/zhangnju/wmma_rdna3_rdna4/blob/main/samples/wmma_rdna4_lane_mapping_demo.cpp)。
-
-已在 ROCm 7.2 与 RDNA 4 GPU（gfx1201）上测试。
-
-```bash
-hipcc --offload-arch=gfx1201 samples/wmma_rdna4_lane_mapping_demo.cpp -o wmma_rdna4_lane_mapping_demo
-./wmma_rdna4_lane_mapping_demo
-```
-
 ### 示例 1：FP16 输入、FP32 输出（Wave32，RDNA 4）
 
 本示例在 RDNA 4（gfx12）上用 WMMA intrinsic 实现 16×16×16 分块 GEMM `D = A×B + C`，FP16 输入、FP32 累加，并在 Host 用 CPU 参考验证 GPU 结果——问题形状与 `samples/wmma_rdna3_fp16.cpp` 相同，但使用 GFX12 的 Wave32 寄存器映射与 builtin 名。
 
-设备核 `wmma_gemm_rdna4` 启动含 32 个线程的一个块（一波）。每条 lane 先按 gfx12 下标将八个半精度值收集到 A、B 的 `half8_t` 分片中（lane 低位选 A 的 M 行与 B 的 N 列；lane 0–15 覆盖 K=0–7，16–31 覆盖 K=8–15；索引 e 在该 8 元 K 范围内再细分）。再按 lane 装入 C 的八个 float——累加器布局与 D 一致，八个槽沿分块内 M 行走，lane 对 16 取余选 N。随后调用 `__builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12`，再按与 C 相同的 scatter 模式写 D。无 `OPSEL`，A/B 也无重复 lane：每条 lane 提供不同操作数数据，与 RDNA 3 不同。
+#### GFX12 Lane 映射
+
+gfx12 的累加器采用"列分布分片布局"，VGPR 表示为：
+
+```
+VGPR[lane][j] = matrix[(lane / 16) * 8 + j][lane % 16]
+```
+
+| 分量 | 含义 |
+|------|------|
+| `lane % 16` | **列索引**（跨 lane 的快变维） |
+| `(lane / 16) * 8` | 该 lane 所在行块的起始行号 |
+| `j`（0–7） | 行块内的行偏移 |
+
+子分组分布（Wave32）：
+
+| SubGroup | Lane 范围 | 覆盖列 | 覆盖行 | K 范围 |
+|----------|-----------|--------|--------|--------|
+| SubGroup 0 | Lane 0–15 | 列 0–15 | 行 0–7 | 0–7 |
+| SubGroup 1 | Lane 16–31 | 列 0–15 | 行 8–15 | 8–15 |
+
+由此得出 kernel 中使用的加载/写回公式：
+
+```cpp
+// A/B 操作数 — 每 lane 8 个元素
+const int mn = lane % 16;            // A 的行索引，同时也是 B 的列索引
+const int k  = (lane / 16) * 8 + e; // K 偏移，e = 0..7
+a_frag[e] = A[k * 16 + mn];         // A 列主序
+b_frag[e] = B[k * 16 + mn];         // B 行主序
+
+// C/D 累加器 — 每 lane 8 个 float
+const int col = lane % 16;
+const int row = (lane / 16) * 8 + e;
+c_frag[e] = C[row * 16 + col];      // 行主序加载
+D[row * 16 + col] = d_frag[e];      // 行主序写回
+```
+
+> **易错点：** `lane % 16` 对应**列**而非行。若写成 `row = lane % 16` 会导致静默转置错误——这正是 [ROCm issue #6025](https://github.com/ROCm/ROCm/issues/6025) 记录的典型问题。
+
+#### Kernel 概述
+
+设备核 `wmma_gemm_rdna4` 启动含 32 个线程的一个块（一波）。每条 lane 按上述公式将八个 `_Float16` 值收集到 A、B 的 `half8_t` 分片，装入 C 的八个 float，调用 `__builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12`，再按相同的行/列映射写回 D。无 `OPSEL`，A/B 也无重复 lane——每条 lane 提供不同操作数数据，与 RDNA 3 不同。
 
 Host 上 `cpu_gemm_16x16_ref` 用 `long double` 重算该分块，与 GPU 的 D 比较，打印采样与最大绝对误差；若最大误差超过 1e-2 则返回非零退出码。
 

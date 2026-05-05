@@ -43,7 +43,7 @@ All samples are in the [`samples/`](samples/) directory. Each program includes a
 
 | 文件 | 数据类型 | 说明 |
 |------|----------|------|
-| [wmma_rdna4_fp16.cpp](samples/wmma_rdna4_fp16.cpp) | FP16 输入 → FP32 累加 | GFX12 新 intrinsic，无 lane 重复 |
+| [wmma_rdna4_fp16.cpp](samples/wmma_rdna4_fp16.cpp) | FP16 输入 → FP32 累加 | GFX12 新 intrinsic，无 lane 重复；含完整 lane mapping 注释（`VGPR[lane][j] = D[(lane/16)*8+j][lane%16]`） |
 | [wmma_rdna4_fp8.cpp](samples/wmma_rdna4_fp8.cpp) | FP8(E4M3) 输入 → FP32 累加 | RDNA 4 专有 FP8 支持 |
 | [wmma_rdna4_iu8.cpp](samples/wmma_rdna4_iu8.cpp) | INT8 输入 → INT32 累加 | GFX12 符号位标志语义变化 |
 | [wmma_rdna4_iu4.cpp](samples/wmma_rdna4_iu4.cpp) | INT4 输入 → INT32 累加 | K=16 与 K=32 两种 tile 宽度 |
