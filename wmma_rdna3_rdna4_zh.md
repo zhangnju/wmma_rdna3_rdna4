@@ -265,8 +265,6 @@ VGPR[lane][j] = matrix[(lane / 16) * 8 + j][lane % 16]
 | SubGroup 0 | Lane 0–15 | 列 0–15 | 行 0–7 |
 | SubGroup 1 | Lane 16–31 | 列 0–15 | 行 8–15 |
 
-> 验证环境：AMD Radeon AI PRO R9700（gfx1201），ROCm 7.1，使用单位矩阵、非对称矩阵及最大 17408×5120 矩阵测试（[ROCm issue #6025](https://github.com/ROCm/ROCm/issues/6025)）。该映射适用于 gfx12 所有 WMMA 数据类型（FP16、INT4 等均已验证）。
-
 ![RDNA 4 累加器 lane 映射图](images/rdna4_accumulator_lane_mapping.svg)
 
 与 CDNA MFMA 的关系： gfx12 WMMA 与 MI300 上的 MFMA 遵循相同原则——`lane % 16` 选列，lane 分组选行块；区别在于 WMMA 为 2 个子分组 × 8 行（Wave32），MFMA 为 4 个子分组 × 4 行（Wave64）。
@@ -385,8 +383,6 @@ const int row = (lane / 16) * 8 + e;
 c_frag[e] = C[row * 16 + col];      // 行主序加载
 D[row * 16 + col] = d_frag[e];      // 行主序写回
 ```
-
-> **易错点：** `lane % 16` 对应**列**而非行。若写成 `row = lane % 16` 会导致静默转置错误——这正是 [ROCm issue #6025](https://github.com/ROCm/ROCm/issues/6025) 记录的典型问题。
 
 #### Kernel 概述
 
@@ -514,8 +510,8 @@ hipcc --offload-arch=gfx1201 samples/tiled_gemm_rdna4.cpp -o tiled_gemm_rdna4
 | 架构代号 | `gfx1100`–`gfx1102`（ROCm 中亦见 `gfx1150`、`gfx1151` 等 GFX11 目标） | `gfx1200`、`gfx1201` |
 | 分块尺寸 | 典型 FP / INT8 WMMA 为 **16×16×16** | 多数类型相同；gfx12 上 **INT4** 另有更大 **K** 形状（如 **16×16×32**）——见 [RDNA 4 (GFX12) WMMA](#rdna-4-gfx12-wmma) 类型表 / ISA |
 | 波前模式 | Wave32 / Wave64 | Wave32（示例）；亦有 `_w64_gfx12` intrinsic |
-| FP16/BF16 FLOPS/时钟/CU | 256 | 512（按 AMD 架构公开信息；以 SKU 为准） |
-| INT8 FLOPS/时钟/CU | 256 | 1024（按 AMD 架构公开信息；以 SKU 为准） |
+| FP16/BF16 FLOPS/时钟/CU | 256 | 512 |
+| INT8 FLOPS/时钟/CU | 256 | 1024 |
 | FP8 | 无 | 有（E4M3、E5M2） |
 | 结构化稀疏 | 无 | 有（4:2 SWMMAC） |
 | Lane 复制（A/B） | 有 | 无 |
@@ -581,13 +577,7 @@ python3 matrix_calculator.py --architecture gfx1201 \
 
 ## 小结
 
-WMMA 将硬件矩阵加速带入 AMD 消费级 GPU，在无需数据中心 GPU 的情况下显著提升 AI 与通用计算性能。RDNA 3 奠定了 FP16/BF16/INT8 基础；RDNA 4 在更高吞吐、取消镜像 lane 带来的更清晰操作数布局，以及 FP8 等新数据类型所支撑的超低精度推理等方面进一步发力。
-
-编写 WMMA 代码时请牢记：
-
-1. RDNA 3：使用 `__builtin_amdgcn_wmma_*_w32` 或 `*_w64`；为 A/B 的 lane 复制建模。
-2. RDNA 4：使用 `__builtin_amdgcn_wmma_*_w32_gfx12`（或 `*_w64_gfx12`），配合 `half8_t` / `float8_t` 与上文 m/k/n lane 公式做加载与存储；按需使用 FP8 / SWMMAC。**iu8** 使用六参数 builtin，每 lane 用 `int32x2` 打包 A/B（`samples/wmma_rdna4_iu8.cpp`）；**iu4** 在 `…_16x16x16_iu4_…` 上每 lane 用标量 `int32` A/B，在 `…_16x16x32_iu4_…` 上用 `int32x2`（`samples/wmma_rdna4_iu4.cpp`）。
-3. 两代均可考虑 rocWMMA，以获得可移植、易维护的代码。
+WMMA 将硬件矩阵加速带入 AMD 消费级 GPU，在无需数据中心 GPU 的情况下显著提升 AI 与通用计算性能。RDNA 3 奠定了 FP16/BF16/INT8 等 AI 计算基础；RDNA 4 在此之上进一步强化：更高的硬件吞吐、更高效的操作数布局，以及 FP8 等低精度数据类型的推理支持。随着 AMD Radeon GPU 性能的持续演进，消费级显卡的矩阵算力已大幅提升，虽与数据中心 GPU 仍有差距，但凭借低成本、本地可用的优势，已能为广大开发者提供在本地开展 AI 研究、模型推理乃至高性能计算的实际可能。我们鼓励更多开发者将目光投向 AMD Radeon GPU 平台，积极尝试 WMMA 编程，尤其推荐以 **rocWMMA** 作为起点——它屏蔽了底层 intrinsic 的代际细节，提供与 `nvcuda::wmma` 相近的 C++ 接口，让熟悉 CUDA 生态的开发者也能快速上手，同时在 RDNA 3、RDNA 4 乃至 CDNA 系列上均可获得良好的可移植性。
 
 ---
 

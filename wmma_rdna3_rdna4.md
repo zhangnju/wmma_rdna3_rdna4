@@ -84,18 +84,29 @@ We take Wave32 FP16 input/FP32 accumulator as an example to introduce RDNA3 WMMA
 
 In Wave32 FP16 WMMA there are 32 threads, but A and B only need 16 different operand inputs; each input is duplicated on lanes *i* and *i*+16 (same registers on both). Number those setups t = 0…15: t is one row index into the A tile and one column index into the B tile, and you use the same t for both.This A/B replication quirk is eliminated on RDNA 4 — a key improvement discussed below.
 
+**Figure 1: A/B Operand Lane Mapping** — Shows the layout where Lanes 0–15 hold the primary data and Lanes 16–31 mirror them in Wave32:
+
+![RDNA 3 A/B Lane Mapping](images/rdna3_ab_lane_layout.svg)
+
 With A column-major (`A[m,k]` at `k*16+m`) and B row-major (`B[k,n]` at `k*16+n`), AMD GPUOpen and Composable Kernel tests use:
 
 - `a_frag[k]` = A[t,k] for k = 0…15 — row t of the A tile.
 - `b_frag[k]` = B[k,t] for k = 0…15 — column t of the B tile.
 
+**Figure 2: A/B VGPR Packing Format** — Shows how each lane packs 16 FP16 elements into 8 32-bit VGPRs, and the VGPR count comparison across precisions (FP16/INT8/INT4):
+
+![RDNA 3 VGPR Packing](images/rdna3_vgpr_packing.svg)
 
 For FP32 C and D (accumulator), the thirty-two threads fill a 16×16 output tile by assigning two threads to each output column. One thread supplies eight accumulators for the even rows in that column, the other for the odd rows, so the column is complete with no overlap. In the usual block ordering, those two threads sit sixteen positions apart. After the instruction, scatter results in row-major form—each full row of the tile laid out left to right before the next row. The sample *samples/wmma_rdna3_fp16.cpp* and Composable Kernel WMMA tests use the same convention.
+
+**Figure 3: C/D Accumulator Register Layout** — Shows which rows each lane is responsible for in a 16×16 output tile and the correspondence between 8 FP32 VGPRs and matrix elements:
+
+![RDNA 3 C/D Accumulator Layout](images/rdna3_cd_accumulator_layout.svg)
 
 
 ### Intrinsic Syntax
 
-Reading left to right, `__builtin_amdgcn_wmma_f32_16x16x16_f16_w32` means: `f32` is the `C`/`D` (accumulator / result) element type, `16x16x16` is the WMMA tile shape (M×N×K), `f16` is the `A`/`B` input element type, and `_w32` / `_w64` is the wave mode. Integer variants swap the type fields (e.g. `i32_16x16x16_iu8`) and add control parameters (`neg_a`, `neg_b`, `clamp`). 
+Reading left to right, `__builtin_amdgcn_wmma_f32_16x16x16_f16_w32` means: `f32` is the `C`/`D` (accumulator / result) element type, `16x16x16` is the WMMA tile shape (M×N×K), `f16` is the `A`/`B` input element type, and `_w32` / `_w64` is the wave mode. Integer variants swap the type fields (e.g. `i32_16x16x16_iu8`) and add control parameters (`neg_a`, `neg_b`, `clamp`). On RDNA 4, the naming convention is the same but with the `_gfx12` suffix appended.
 
 For FP32 accumulator (e.g. `f32_16x16x16_f16`, `f32_16x16x16_bf16`), Clang expects only three arguments:
 
@@ -111,7 +122,39 @@ D_frag = __builtin_amdgcn_wmma_f16_16x16x16_f16_w<32|64>(
     A_frag, B_frag, C_frag, OPSEL);
 ```
 
-Integer WMMA variants take `neg_a` / `neg_b` / `clamp` and packed operands. `i32_16x16x16_iu8` uses `int32x4` (`__builtin_bit_cast` from 16×`int8` ,see the sample code in [Composable Kernel](https://github.com/ROCm/composable_kernel/blob/develop/include/ck/utility/amd_wmma.hpp#L127-L137)). `i32_16x16x16_iu4` uses `int32x2` (sixteen 4-bit elements packed into two `int32`s; `__builtin_amdgcn_wmma_i32_16x16x16_iu4_w32`). CK uses `neg_a` and `neg_b` both `true` for Wave32 iu8; iu4 matches that in [`builtin_wmma_naive_selector`](https://github.com/ROCm/composable_kernel/blob/develop/test/wmma_op/wmma_op_util.hpp#L84-L96) when built with `CK_EXPERIMENTAL_BIT_INT_EXTENSION_INT4`. Operand staging follows the [`matmul code`](https://github.com/ROCm/composable_kernel/blob/develop/test/wmma_op/wmma_op_util.hpp#L98-L192) shared-memory swizzle, not FP16-style direct global loads. Composable Kernel’s WMMA op test stores **A row-major M×K** and **B column-major K×N** in global memory; this repo’s **`samples/wmma_rdna3_iu8.cpp`** and **`samples/wmma_rdna3_iu4.cpp`** instead store **A column-major** (`A[m,k]` at `k*16+m`) and **B row-major** (`B[k,n]` at `k*16+n`) like the FP16 sample, and map global loads so the bytes written to shared memory match CK’s staging. Developers can refer to these sample codes in their projects. On RDNA 4, the naming convention is the same but with the `_gfx12` suffix appended.
+Integer WMMA variants take `neg_a` / `neg_b` / `clamp` and packed operands. For `__builtin_amdgcn_wmma_i32_16x16x16_iu8_w32` (INT8 input), each lane provides 16 `int8` elements, which must be cast to `int32x4` (4 `int32` values) via `__builtin_bit_cast` before passing in. The return value is `int32x8`.
+
+```c
+// typedef int32_t int32x4 __attribute__((ext_vector_type(4)));
+// typedef int32_t int32x8 __attribute__((ext_vector_type(8)));
+
+int32x8 d_frag = __builtin_amdgcn_wmma_i32_16x16x16_iu8_w32(
+    bool  neg_a,                        // true → negate A operand (treated as unsigned negation)
+    int32x4 a_frag,                     // 16 × int8, packed little-endian into 4 × int32
+    bool  neg_b,                        // true → negate B operand
+    int32x4 b_frag,                     // 16 × int8, packed little-endian into 4 × int32
+    int32x8 c_frag,                     // accumulator input
+    bool  clamp);                       // true → clamp result to int32 representable range
+```
+
+This corresponds to Composable Kernel [`intrin_wmma_i32_16x16x16_iu8_w32`](https://github.com/ROCm/composable_kernel/blob/develop/include/ck/utility/amd_wmma.hpp#L127-L137); CK sets both `neg_a` and `neg_b` to `true` by default. Operands must be packed after a shared-memory swizzle rather than loaded directly from global memory (see [CK matmul code](https://github.com/ROCm/composable_kernel/blob/develop/test/wmma_op/wmma_op_util.hpp#L98-L192)).
+
+For `__builtin_amdgcn_wmma_i32_16x16x16_iu4_w32` (INT4 input), each lane provides 16 int4 elements (each stored in the low 4 bits of an `int8`), which must be packed into 2 `int32` values (`int32x2`) before passing in. The return value is also `int32x8`.
+
+```c
+// typedef int32_t int32x2 __attribute__((ext_vector_type(2)));
+// typedef int32_t int32x8 __attribute__((ext_vector_type(8)));
+
+int32x8 d_frag = __builtin_amdgcn_wmma_i32_16x16x16_iu4_w32(
+    bool  neg_a,                        // true → negate A operand
+    int32x2 a_pk,                       // 16 × int4, low nibble valid, packed into 2 × int32
+    bool  neg_b,                        // true → negate B operand
+    int32x2 b_pk,                       // 16 × int4, same as above
+    int32x8 c_frag,                     // accumulator input
+    bool  clamp);                       // true → clamp result
+```
+
+Packing order: the 0th INT4 input goes in bits 3:0 of `a_pk[0]`, the 1st in bits 7:4, and so on through the 7th; inputs 8–15 fill `a_pk[1]` the same way. Adjust `pack_iu4_x16` (see `samples/wmma_rdna3_iu4.cpp`) if your toolchain or ISA convention differs.
 
 ### Example: FP16 Input, FP32 Output (Wave32, RDNA 3)
 
@@ -171,8 +214,8 @@ RDNA 4 introduces 3rd-generation Matrix Cores with several improvements:
 
 | Metric | RDNA 3 | RDNA 4 |
 |--------|--------|--------|
-| FP16 / BF16 FLOPS per clock per CU | 256 | 512 (approx. 2×, per AMD architecture disclosures; verify per SKU) |
-| INT8 FLOPS per clock per CU | 256 | 1024 (approx. 4×, per AMD architecture disclosures; verify per SKU) |
+| FP16 / BF16 FLOPS per clock per CU | 256 | 512 |
+| INT8 FLOPS per clock per CU | 256 | 1024 |
 | FP8 support | No | Yes (E4M3 / E5M2) |
 | Structured sparsity | No | Yes (4:2, via SWMMAC) |
 | Register duplication | Yes (A/B lanes 16–31) | Eliminated |
@@ -182,9 +225,9 @@ RDNA 4 introduces 3rd-generation Matrix Cores with several improvements:
 
 ### Register layout: no lane mirroring (RDNA 4)
 
-![RDNA 4 No Lane Mirroring Register Layout](images/rdna4_no_lane_mirror_layout.svg)
-
 The main improvement over RDNA 3 is removing redundant A/B replication: on GFX11, lanes 16–31 carried the same A/B operands as lanes 0–15. On GFX12, each lane holds eight unique FP16 values (`half8_t`) with no mirror lanes.
+
+![RDNA 4 No Lane Mirroring Register Layout](images/rdna4_no_lane_mirror_layout.svg)
 
 ```
 RDNA 3 (Wave32) — A/B operands (conceptual):
@@ -195,7 +238,36 @@ RDNA 4 (Wave32) — A/B operands:
   Lanes 0–31: eight unique FP16 values per lane (no mirror)
 ```
 
-Chaining WMMA (e.g. MLP) still needs a layout transform: on gfx12, the layout used for the A and B operands is not the same as the layout of the D accumulator (see formulas below). You normally write D to shared or global memory in row-major form, then reload the next operand with the correct mapping, or use rocWMMA / Composable Kernel. See [ROCm issue #6025](https://github.com/ROCm/ROCm/issues/6025).
+#### Exact Accumulator (D) Lane Mapping Formula
+
+> Source: [ROCm issue #6025](https://github.com/ROCm/ROCm/issues/6025) — this issue notes that the RDNA 4 ISA documentation omits this mapping, causing developers to hit silent transpose bugs.
+
+On gfx12, the accumulator (C/D) uses a *column-distributed fragment layout*:
+
+```
+VGPR[lane][j] = matrix[(lane / 16) * 8 + j][lane % 16]
+```
+
+Breakdown:
+
+| Component | Meaning |
+|-----------|---------|
+| `lane % 16` | **Column index** (fast-varying dimension across lanes) |
+| `(lane / 16) * 8` | Starting row of this lane's row-block |
+| `j` (0–7) | Row offset within the block |
+
+SubGroup breakdown (Wave32):
+
+| SubGroup | Lane Range | Columns | Rows |
+|----------|-----------|---------|------|
+| SubGroup 0 | Lanes 0–15 | Columns 0–15 | Rows 0–7 |
+| SubGroup 1 | Lanes 16–31 | Columns 0–15 | Rows 8–15 |
+
+![RDNA 4 Accumulator Lane Mapping](images/rdna4_accumulator_lane_mapping.svg)
+
+Relation to CDNA MFMA: gfx12 WMMA follows the same principle as MFMA on MI300 — `lane % 16` selects the column, lane grouping selects the row block; the difference is WMMA uses 2 subgroups × 8 rows (Wave32) while MFMA uses 4 subgroups × 4 rows (Wave64).
+
+Chaining WMMA (e.g. MLP) still needs a layout transform: on gfx12, the A/B operand layout ≠ the D accumulator layout. You normally write D to shared or global memory in row-major form, then reload the next layer's operands with the correct mapping, or use rocWMMA / Composable Kernel.
 
 ### New Data Types in RDNA 4
 
@@ -251,7 +323,21 @@ D_frag = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
     neg_a, A_frag, neg_b, B_frag, C_frag, clamp);
 ```
 
-**Common pitfall:** For the result tile, the lane index modulo 16 maps to the N column, not the M row — this is easy to confuse when porting from CUDA ([ROCm #6025](https://github.com/ROCm/ROCm/issues/6025)).
+**Common pitfall:** For the result tile, the lane index modulo 16 maps to the N column, not the M row — this is easy to confuse when porting from CUDA and causes a silent transpose bug ([ROCm #6025](https://github.com/ROCm/ROCm/issues/6025)).
+
+Correct store pattern:
+
+```c
+int lane    = threadIdx.x % 32;
+int out_col = lane % 16;           // column: fast-varying dimension across lanes
+int out_row0 = (lane / 16) * 8;   // starting row of this lane's row-block
+
+for (int j = 0; j < 8; j++) {
+    int r = tile_row + out_row0 + j;
+    int c = tile_col + out_col;
+    C[r * N + c] = acc[j];         // acc[j] = matrix[row0+j][out_col]
+}
+```
 
 ### Example 1: FP16 Input, FP32 Output (Wave32, RDNA 4)
 
@@ -293,8 +379,6 @@ const int row = (lane / 16) * 8 + e;
 c_frag[e] = C[row * 16 + col];      // row-major load
 D[row * 16 + col] = d_frag[e];      // row-major store
 ```
-
-> **Common pitfall:** `lane % 16` maps to the **column**, not the row. Writing `row = lane % 16` causes a silent transpose — the exact mistake documented in [ROCm issue #6025](https://github.com/ROCm/ROCm/issues/6025).
 
 #### Kernel Overview
 
@@ -423,8 +507,8 @@ hipcc --offload-arch=gfx1201 samples/tiled_gemm_rdna4.cpp -o tiled_gemm_rdna4
 | Architecture code | `gfx1100`–`gfx1102` (other GFX11 targets such as `gfx1150`, `gfx1151` also appear in ROCm) | `gfx1200`, `gfx1201` |
 | Tile size | **16×16×16** for typical FP / INT8 WMMA | Same for most types; **INT4** on gfx12 also has larger-**K** shapes (e.g. **16×16×32**) — see [RDNA 4 (GFX12) WMMA](#rdna-4-gfx12-wmma) type table / ISA |
 | Wavefront mode | Wave32 / Wave64 | Wave32 (examples); `_w64_gfx12` intrinsics also exist |
-| FP16/BF16 FLOPS/clock/CU | 256 | 512 (approx. 2×, per AMD arch disclosures; verify per SKU) |
-| INT8 FLOPS/clock/CU | 256 | 1024 (approx. 4×, per AMD arch disclosures; verify per SKU) |
+| FP16/BF16 FLOPS/clock/CU | 256 | 512  |
+| INT8 FLOPS/clock/CU | 256 | 1024  |
 | FP8 support | No | Yes (E4M3, E5M2) |
 | Structured sparsity | No | Yes (4:2 SWMMAC) |
 | Lane duplication (A/B) | Yes | No |
@@ -490,13 +574,7 @@ Output includes: opcode, VGPR count, element mapping per lane, and peak throughp
 
 ## Summary
 
-WMMA brings hardware matrix acceleration to AMD's consumer GPU line, enabling significant AI and compute performance gains without requiring a datacenter GPU. RDNA 3 introduced the foundation with FP16/BF16/INT8 support; RDNA 4 doubles down with higher throughput, a cleaner operand layout without mirror lanes, and new FP8 data types opening the door to ultra-low-precision inference. 
-
-When writing WMMA code:
-
-1. RDNA 3: use `__builtin_amdgcn_wmma_*_w32` or `*_w64` intrinsics; account for lane duplication in A/B.
-2. RDNA 4: use `__builtin_amdgcn_wmma_*_w32_gfx12` (or `*_w64_gfx12`) with `half8_t` / `float8_t` and the m/k/n lane formulas above for loads and stores; add FP8 / SWMMAC where applicable. **iu8** uses six-argument builtins with `int32x2`-packed **A/B** per lane (`samples/wmma_rdna4_iu8.cpp`); **iu4** uses **scalar `int32`** **A/B** for **`…_16x16x16_iu4_…`** and **`int32x2`** for **`…_16x16x32_iu4_…`** (`samples/wmma_rdna4_iu4.cpp`).
-3. Both: consider rocWMMA for portable, maintainable code.
+WMMA brings hardware matrix acceleration to AMD's consumer GPU line, enabling significant AI and compute performance gains without requiring a datacenter GPU. RDNA 3 introduced the foundation with FP16/BF16/INT8 support; RDNA 4 doubles down with higher throughput, a cleaner operand layout without mirror lanes, and new FP8 data types opening the door to ultra-low-precision inference. As AMD Radeon GPUs continue to advance, consumer graphics cards have seen substantial gains in matrix compute performance — still behind datacenter GPUs, but with the advantage of low cost and local availability, they now offer developers a real opportunity to pursue local AI research, model inference, and high-performance computing. We encourage more developers to explore the AMD Radeon GPU platform and experiment with WMMA programming — **rocWMMA** is the recommended starting point: it abstracts away the per-generation intrinsic details, offers a C++ API close to `nvcuda::wmma` so developers already familiar with the CUDA ecosystem can get productive quickly, and provides solid portability across RDNA 3, RDNA 4, and the CDNA line.
 
 ---
 
