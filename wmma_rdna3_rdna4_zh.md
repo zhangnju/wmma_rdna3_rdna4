@@ -114,7 +114,7 @@ D_frag = __builtin_amdgcn_wmma_f16_16x16x16_f16_w<32|64>(
 
 设备端 kernel 为 A、B 装入 16 宽的 FP16 分片、为 C 每线程装入 8 个 float（分布在波的两个 16-lane 半波上），再调用 WMMA intrinsic，将结果写入 D。
 
-源文件：`[samples/wmma_rdna3_fp16.cpp](https://github.com/zhangnju/wmma_rdna3_rdna4/blob/main/samples/wmma_rdna3_fp16.cpp)`，已在 ROCm 7.2 与 RDNA 3 GPU 上测试。
+源文件：[`samples/wmma_rdna3_fp16.cpp`](https://github.com/zhangnju/wmma_rdna3_rdna4/blob/main/samples/wmma_rdna3_fp16.cpp)，已在 ROCm 7.2 与 RDNA 3 GPU 上测试。
 
 ```bash
 hipcc --offload-arch=gfx1100 samples/wmma_rdna3_fp16.cpp -o wmma_rdna3_fp16
@@ -125,7 +125,7 @@ hipcc --offload-arch=gfx1100 samples/wmma_rdna3_fp16.cpp -o wmma_rdna3_fp16
 
 INT8 的 WMMA 路径不会像 FP16 输入那样，把操作数用一次简单的全局加载直接装进分片。在 **`samples/wmma_rdna3_iu8.cpp`** 中，**A** 为列主序 **M×K**，**B** 为行主序 **K×N**，**C**/**D** 为行主序 **M×N**（与上文 FP16 输入、FP32 累加的约定一致）。每条线程先从 **A**、**B** 各读出八个 8 位元素，下标随 lane 变化；波的前半与后半分别覆盖沿 **K** 的互补条带，对应 **A** 的固定行与 **B** 的固定列。数据写入共享内存后，经与 Composable Kernel [`matmul`](https://github.com/ROCm/composable_kernel/blob/develop/test/wmma_op/wmma_op_util.hpp#L98-L192) 相同的重排，再发出 RDNA 3 Wave32 的 iu8 WMMA，两个操作数取反标志均置位，与 [`builtin_wmma_naive_selector` 的 8 位路径](https://github.com/ROCm/composable_kernel/blob/develop/test/wmma_op/wmma_op_util.hpp#L72-L82) 一致。CK 的 WMMA op 测试在全局内存仍采用 **A 行主序、B 列主序**；本示例的布局与之不同，但 staging 之后送入硬件的操作数字节与 CK 管线一致。**C**/**D** 的累加器分布与前面 FP16→FP32 示例相同：每个输出列由两条线程分工，分别负责偶数行与奇数行上的八个累加位置。Host 侧用更宽的整数做乘加，再把整块结果收束到 32 位整数后与 GPU 对比。
 
-源文件：`[samples/wmma_rdna3_iu8.cpp](https://github.com/zhangnju/wmma_rdna3_rdna4/blob/main/samples/wmma_rdna3_iu8.cpp)`。
+源文件：[`samples/wmma_rdna3_iu8.cpp`](https://github.com/zhangnju/wmma_rdna3_rdna4/blob/main/samples/wmma_rdna3_iu8.cpp)。
 
 ```bash
 hipcc --offload-arch=gfx1100 -std=c++20 samples/wmma_rdna3_iu8.cpp -o wmma_rdna3_iu8
@@ -136,7 +136,7 @@ hipcc --offload-arch=gfx1100 -std=c++20 samples/wmma_rdna3_iu8.cpp -o wmma_rdna3
 
 **samples/wmma_rdna3_iu4.cpp** 的讲解与 INT8 示例同属一套套路：**A** 列主序 **M×K**，**B** 行主序 **K×N**，**C**/**D** 行主序 **M×N**；操作数仍先经共享内存重排，再发带取反标志的整数 WMMA。差别在精度：**A**、**B** 虽用字节数组存放，但每个元素在数学上是 **4 位有符号**（−8～7）。打包进指令时 **只认每个字节的低 4 位**，高 4 位视为不参与运算。每条 lane 先凑齐十六个这样的 4 位数（在寄存器里仍以十六个字节形式出现），再按固定顺序 **把十六个半字节压进两个 32 位字**，然后才发出 RDNA 3 Wave32 的 INT4 WMMA。若你的芯片或工具链对这两个字内部半字节顺序有不同约定，应改打包逻辑，使其与 Clang 与 ISA 说明一致。
 
-源文件：`[samples/wmma_rdna3_iu4.cpp](https://github.com/zhangnju/wmma_rdna3_rdna4/blob/main/samples/wmma_rdna3_iu4.cpp)`。
+源文件：[`samples/wmma_rdna3_iu4.cpp`](https://github.com/zhangnju/wmma_rdna3_rdna4/blob/main/samples/wmma_rdna3_iu4.cpp)。
 
 
 ```bash
@@ -151,9 +151,7 @@ hipcc --offload-arch=gfx1100 -std=c++20 samples/wmma_rdna3_iu4.cpp -o wmma_rdna3
 
 **A**、**B** 的装入规则与 FP32 累加示例相同：**A** 列主序，每条 lane 对应一行下标；**B** 行主序，每条 lane 对应一列下标。**C**、**D** 仍为 **每条 lane 八个输出位置**，在同一输出列内按偶数行与奇数行分给不同线程。选用“低 16 位”模式时，这八个值各占成对寄存器槽里的 **前半段**；读回结果时同样只取该半段，再按与先前示例一致的行、列含义写回 **D** 的行主序缓冲。
 
-Host 校验时，FP16 路径在规约过程中按半精度写回做舍入，比纯 FP32 仿真更贴近设备。BF16 路径在 CPU 侧用 **无符号 16 位**保存位型，内核侧使用工具链提供的 **BF16 类型**（需较新的 ROCm HIP-Clang）。硬件对 BF16 的融合与顺序可能与 CPU 上简单的标量 float 循环不一致，在浮点域对比时可预期 **比 FP16 稍宽**的误差。
-
-源文件：`[samples/wmma_rdna3_f16_bf16_acc.cpp](https://github.com/zhangnju/wmma_rdna3_rdna4/blob/main/samples/wmma_rdna3_f16_bf16_acc.cpp)`。
+源文件：[`samples/wmma_rdna3_f16_bf16_acc.cpp`](https://github.com/zhangnju/wmma_rdna3_rdna4/blob/main/samples/wmma_rdna3_f16_bf16_acc.cpp)。
 
 ```bash
 hipcc --offload-arch=gfx1100 -O2 samples/wmma_rdna3_f16_bf16_acc.cpp -o wmma_rdna3_f16_bf16_acc
@@ -254,7 +252,7 @@ D_frag = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12(
 
 Host 上 `cpu_gemm_16x16_ref` 用 `long double` 重算该分块，与 GPU 的 D 比较，打印采样与最大绝对误差；若最大误差超过 1e-2 则返回非零退出码。
 
-源文件：`[samples/wmma_rdna4_fp16.cpp](https://github.com/zhangnju/wmma_rdna3_rdna4/blob/main/samples/wmma_rdna4_fp16.cpp)`。
+源文件：[`samples/wmma_rdna4_fp16.cpp`](https://github.com/zhangnju/wmma_rdna3_rdna4/blob/main/samples/wmma_rdna4_fp16.cpp)。
 
 已在 ROCm 7.2 与 RDNA 4 GPU（如 RX 9070 XT）上测试。
 
@@ -269,7 +267,7 @@ hipcc --offload-arch=gfx1201 samples/wmma_rdna4_fp16.cpp -o wmma_rdna4_fp16
 
 设备核 `wmma_gemm_rdna4_fp8` 使用 `pack_fp8_A_col` 与 `pack_fp8_B_row`，按与 FP16 示例相同的 (m,k)、(k,n) 下标从全局内存为每 lane 收集八个 FP8 字节，再打包为 `int32x2`（两个小端 32 位字与八个字节的联合体），供 `__builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8_w32_gfx12` 使用。C 的加载与 D 的写回遵循与 `wmma_rdna4_fp16.cpp` 相同的每 lane 八个 float 累加器映射。
 
-源文件：`[samples/wmma_rdna4_fp8.cpp](https://github.com/zhangnju/wmma_rdna3_rdna4/blob/main/samples/wmma_rdna4_fp8.cpp)`。
+源文件：[`samples/wmma_rdna4_fp8.cpp`](https://github.com/zhangnju/wmma_rdna3_rdna4/blob/main/samples/wmma_rdna4_fp8.cpp)。
 
 已在 ROCm 7.2 与 RDNA 4 GPU（如 RX 9070 XT）上测试。
 
@@ -284,7 +282,7 @@ hipcc --offload-arch=gfx1201 samples/wmma_rdna4_fp8.cpp -o wmma_rdna4_fp8
 
 与 FP16 gfx12 不同，iu8 操作数不能仅靠每 lane 简单全局 gather：核内复用与 RDNA 3 相同的共享内存 swizzle 构造 `int8x16` A/B 分片，再为 gfx12 拆分——线程 0–15 使用字节 `[0..7]`，16–31 使用 `[8..15]`——并用 `__builtin_bit_cast` 将八个字节转为 `int32x2`。C 的加载与 D 的写回使用 gfx12 累加器映射（与 `wmma_rdna4_fp16.cpp` 相同）。builtin 为 `__builtin_amdgcn_wmma_i32_16x16x16_iu8_w32_gfx12`；前两个 `bool` 为符号标志（`true` 表示有符号 int8），并非取反；`clamp` 为 `false`。
 
-源文件：`[samples/wmma_rdna4_iu8.cpp](https://github.com/zhangnju/wmma_rdna3_rdna4/blob/main/samples/wmma_rdna4_iu8.cpp)`。需用 C++20 以使用 `__builtin_bit_cast`。
+源文件：[`samples/wmma_rdna4_iu8.cpp`](https://github.com/zhangnju/wmma_rdna3_rdna4/blob/main/samples/wmma_rdna4_iu8.cpp)。需用 C++20 以使用 `__builtin_bit_cast`。
 
 已在 ROCm 7.2 与 RDNA 4 GPU（如 RX 9070 XT）上测试。
 
@@ -301,7 +299,7 @@ K=16 路径将每 lane 八个 nibble 打包进一个 `int32`（`pack_iu4_x8`）�
 
 Host 参考：`cpu_gemm_i4_i32` 与 `sx_i4`，与 `wmma_rdna3_iu4.cpp` 相同。
 
-源文件：`[samples/wmma_rdna4_iu4.cpp](https://github.com/zhangnju/wmma_rdna3_rdna4/blob/main/samples/wmma_rdna4_iu4.cpp)`。
+源文件：[`samples/wmma_rdna4_iu4.cpp`](https://github.com/zhangnju/wmma_rdna3_rdna4/blob/main/samples/wmma_rdna4_iu4.cpp)。
 已在 ROCm 7.2 与 RDNA 4 GPU（如 RX 9070 XT）上测试。
 
 ```bash
@@ -313,7 +311,7 @@ hipcc --offload-arch=gfx1201 -std=c++20 samples/wmma_rdna4_iu4.cpp -o wmma_rdna4
 
 在 gfx12 上，D 的累加器布局与 B 的操作数布局不同，因此不能不经重排就把第一次 WMMA 的寄存器输出直接当作第二次 WMMA 的 B 分片。典型做法是一小段共享内存：按行主序写入，再按上文 B 的 gather 方式加载。`samples/mlp_wmma_rdna4.cpp` 在 16×16 分块上实现 `output = W2 * relu(W1 * input)`：两次 `_gfx12` WMMA，在 FP32 上做 `relu`，隐藏分块写入 `__half` 共享内存（与第二层的 FP16 B 操作数一致）。第二次 WMMA 使用新的零累加器 `acc1`，而不是传入第一次 WMMA 的那个变量。
 
-源文件：`[samples/mlp_wmma_rdna4.cpp](https://github.com/zhangnju/wmma_rdna3_rdna4/blob/main/samples/mlp_wmma_rdna4.cpp)`。
+源文件：[`samples/mlp_wmma_rdna4.cpp`](https://github.com/zhangnju/wmma_rdna3_rdna4/blob/main/samples/mlp_wmma_rdna4.cpp)。
 
 ```bash
 hipcc --offload-arch=gfx1201 samples/mlp_wmma_rdna4.cpp -o mlp_wmma_rdna4
@@ -330,7 +328,7 @@ hipcc --offload-arch=gfx1201 samples/mlp_wmma_rdna4.cpp -o mlp_wmma_rdna4
 
 **rocWMMA 7.x 说明：** 从全局内存加载累加器时，`load_matrix_sync` 的重载需显式指定布局，例如 `load_matrix_sync(c_frag, C, ld, mem_row_major)`——当 `c_frag` 类型没有静态布局时，旧的三参数形式不够用。
 
-源文件：`[samples/rocwmma_example.cpp](https://github.com/zhangnju/wmma_rdna3_rdna4/blob/main/samples/rocwmma_example.cpp)`。
+源文件：[`samples/rocwmma_example.cpp`](https://github.com/zhangnju/wmma_rdna3_rdna4/blob/main/samples/rocwmma_example.cpp)。
 
 ```bash
 hipcc --offload-arch=native samples/rocwmma_example.cpp -o rocwmma_example
@@ -357,7 +355,7 @@ for each output tile (bm, bn):
 
 `samples/tiled_gemm_rdna4.cpp` 实现 `D = A * B`：`M×K` 的 `__half` 矩阵 A（列主序，步长 `lda`）、`K×N` 的 B（行主序，`ldb`）、`M×N` 的 FP32 D（行主序，`ldd`），且 `M, N, K` 均为 16 的倍数。每个线程块负责一个 16×16 输出分块：`grid(N/16, M/16)`，`block(32)`。可选命令行参数 `M N K`；默认 `32×32×32`。
 
-源文件：`[samples/tiled_gemm_rdna4.cpp](https://github.com/zhangnju/wmma_rdna3_rdna4/blob/main/samples/tiled_gemm_rdna4.cpp)`。
+源文件：[`samples/tiled_gemm_rdna4.cpp`](https://github.com/zhangnju/wmma_rdna3_rdna4/blob/main/samples/tiled_gemm_rdna4.cpp)。
 
 ```bash
 hipcc --offload-arch=gfx1201 samples/tiled_gemm_rdna4.cpp -o tiled_gemm_rdna4

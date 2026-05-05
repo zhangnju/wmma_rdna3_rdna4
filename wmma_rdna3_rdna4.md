@@ -109,7 +109,7 @@ D_frag = __builtin_amdgcn_wmma_f16_16x16x16_f16_w<32|64>(
     A_frag, B_frag, C_frag, OPSEL);
 ```
 
-Integer WMMA variants take `neg_a` / `neg_b` / `clamp` and packed operands. `i32_16x16x16_iu8` uses `int32x4` (`__builtin_bit_cast` from 16×`int8` ,see the sample code in [Composable Kernel](https://github.com/ROCm/composable_kernel/blob/develop/include/ck/utility/amd_wmma.hpp#L127-L137)). `i32_16x16x16_iu4` uses `int32x2` (16 int4 nibbles in two `int32`s; `__builtin_amdgcn_wmma_i32_16x16x16_iu4_w32`). CK uses `neg_a` and `neg_b` both `true` for Wave32 iu8; iu4 matches that in [`builtin_wmma_naive_selector`](https://github.com/ROCm/composable_kernel/blob/develop/test/wmma_op/wmma_op_util.hpp#L84-L96) when built with `CK_EXPERIMENTAL_BIT_INT_EXTENSION_INT4`. Operand staging follows the [`matmul code`](https://github.com/ROCm/composable_kernel/blob/develop/test/wmma_op/wmma_op_util.hpp#L98-L192) shared-memory swizzle, not FP16-style direct global loads. Composable Kernel’s WMMA op test stores **A row-major M×K** and **B column-major K×N** in global memory; this repo’s **`samples/wmma_rdna3_iu8.cpp`** and **`samples/wmma_rdna3_iu4.cpp`** instead store **A column-major** (`A[m,k]` at `k*16+m`) and **B row-major** (`B[k,n]` at `k*16+n`) like the FP16 sample, and map global loads so the bytes written to shared memory match CK’s staging. Developers can refer to these sample codes in their projects. 
+Integer WMMA variants take `neg_a` / `neg_b` / `clamp` and packed operands. `i32_16x16x16_iu8` uses `int32x4` (`__builtin_bit_cast` from 16×`int8` ,see the sample code in [Composable Kernel](https://github.com/ROCm/composable_kernel/blob/develop/include/ck/utility/amd_wmma.hpp#L127-L137)). `i32_16x16x16_iu4` uses `int32x2` (16 int4 nibbles in two `int32`s; `__builtin_amdgcn_wmma_i32_16x16x16_iu4_w32`). CK uses `neg_a` and `neg_b` both `true` for Wave32 iu8; iu4 matches that in [`builtin_wmma_naive_selector`](https://github.com/ROCm/composable_kernel/blob/develop/test/wmma_op/wmma_op_util.hpp#L84-L96) when built with `CK_EXPERIMENTAL_BIT_INT_EXTENSION_INT4`. Operand staging follows the [`matmul code`](https://github.com/ROCm/composable_kernel/blob/develop/test/wmma_op/wmma_op_util.hpp#L98-L192) shared-memory swizzle, not FP16-style direct global loads. Composable Kernel’s WMMA op test stores **A row-major M×K** and **B column-major K×N** in global memory; this repo’s **`samples/wmma_rdna3_iu8.cpp`** and **`samples/wmma_rdna3_iu4.cpp`** instead store **A column-major** (`A[m,k]` at `k*16+m`) and **B row-major** (`B[k,n]` at `k*16+n`) like the FP16 sample, and map global loads so the bytes written to shared memory match CK’s staging. Developers can refer to these sample codes in their projects. On RDNA 4, the naming convention is the same but with the `_gfx12` suffix appended.
 
 ### Example: FP16 Input, FP32 Output (Wave32, RDNA 3)
 
@@ -169,8 +169,8 @@ RDNA 4 introduces 3rd-generation Matrix Cores with several improvements:
 
 | Metric | RDNA 3 | RDNA 4 |
 |--------|--------|--------|
-| FP16 / BF16 FLOPS per clock per CU | 256 | 512 (2×) |
-| INT8 FLOPS per clock per CU | 256 | 1024 (4×) |
+| FP16 / BF16 FLOPS per clock per CU | 256 | 512 (approx. 2×, per AMD architecture disclosures; verify per SKU) |
+| INT8 FLOPS per clock per CU | 256 | 1024 (approx. 4×, per AMD architecture disclosures; verify per SKU) |
 | FP8 support | No | Yes (E4M3 / E5M2) |
 | Structured sparsity | No | Yes (4:2, via SWMMAC) |
 | Register duplication | Yes (A/B lanes 16–31) | Eliminated |
@@ -322,6 +322,8 @@ hipcc --offload-arch=gfx1201 samples/mlp_wmma_rdna4.cpp -o mlp_wmma_rdna4
 ./mlp_wmma_rdna4
 ```
 
+---
+
 ## Using the Higher-Level rocWMMA Library
 
 For applications that don't need to hand-tune intrinsic-level code, AMD provides rocWMMA — a C++ template library with an interface modeled after CUDA's `nvcuda::wmma` API. It handles register layout management automatically and supports both RDNA and CDNA architectures.
@@ -336,6 +338,8 @@ Source file: [`samples/rocwmma_example.cpp`](https://github.com/zhangnju/wmma_rd
 hipcc --offload-arch=native samples/rocwmma_example.cpp -o rocwmma_example
 ./rocwmma_example
 ```
+
+---
 
 ## Scaling Up: Tiled GEMM Beyond 16×16
 
@@ -372,8 +376,8 @@ hipcc --offload-arch=gfx1201 samples/tiled_gemm_rdna4.cpp -o tiled_gemm_rdna4
 | Architecture code | `gfx1100`–`gfx1102` (other GFX11 targets such as `gfx1150`, `gfx1151` also appear in ROCm) | `gfx1200`, `gfx1201` |
 | Tile size | **16×16×16** for typical FP / INT8 WMMA | Same for most types; **INT4** on gfx12 also has larger-**K** shapes (e.g. **16×16×32**) — see [RDNA 4 (GFX12) WMMA](#rdna-4-gfx12-wmma) type table / ISA |
 | Wavefront mode | Wave32 / Wave64 | Wave32 (examples); `_w64_gfx12` intrinsics also exist |
-| FP16/BF16 FLOPS/clock/CU | 256 | 512 (per AMD arch disclosures; verify per SKU) |
-| INT8 FLOPS/clock/CU | 256 | 1024 (per AMD arch disclosures; verify per SKU) |
+| FP16/BF16 FLOPS/clock/CU | 256 | 512 (approx. 2×, per AMD arch disclosures; verify per SKU) |
+| INT8 FLOPS/clock/CU | 256 | 1024 (approx. 4×, per AMD arch disclosures; verify per SKU) |
 | FP8 support | No | Yes (E4M3, E5M2) |
 | Structured sparsity | No | Yes (4:2 SWMMAC) |
 | Lane duplication (A/B) | Yes | No |
