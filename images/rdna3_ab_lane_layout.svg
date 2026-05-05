@@ -1,0 +1,190 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 520" font-family="monospace, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#555"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="860" height="520" fill="#f8f9fa" rx="8"/>
+
+  <!-- Title -->
+  <text x="430" y="36" text-anchor="middle" font-size="17" font-weight="bold" fill="#1a1a2e">RDNA 3 Wave32 — A/B Operand Lane Mapping (FP16, 16×16×16)</text>
+  <text x="430" y="56" text-anchor="middle" font-size="12" fill="#555">Each input is duplicated across lane i and lane i+16 (t = lane mod 16 selects the row/column index)</text>
+
+  <!-- ===== LEFT: Lane table ===== -->
+  <text x="20" y="90" font-size="13" font-weight="bold" fill="#1a1a2e">Wave32 Lane Numbers and t Values</text>
+
+  <!-- header row -->
+  <rect x="20" y="98" width="100" height="24" fill="#c8d8f0" stroke="#aaa"/>
+  <text x="70" y="114" text-anchor="middle" font-size="12" fill="#222">Lane</text>
+  <rect x="120" y="98" width="80" height="24" fill="#c8d8f0" stroke="#aaa"/>
+  <text x="160" y="114" text-anchor="middle" font-size="12" fill="#222">t = lane%16</text>
+  <rect x="200" y="98" width="120" height="24" fill="#c8d8f0" stroke="#aaa"/>
+  <text x="260" y="114" text-anchor="middle" font-size="12" fill="#222">A_frag row</text>
+  <rect x="320" y="98" width="120" height="24" fill="#c8d8f0" stroke="#aaa"/>
+  <text x="380" y="114" text-anchor="middle" font-size="12" fill="#222">B_frag col</text>
+
+  <!-- Primary zone: lanes 0-15 -->
+  <rect x="20" y="122" width="420" height="130" fill="#eaf4fb" stroke="#bcd" stroke-width="0.5"/>
+  <text x="260" y="136" text-anchor="middle" font-size="10" fill="#0055aa" font-weight="bold">Primary data (Lane 0–15)</text>
+
+  <g font-size="11" fill="#222">
+    <!-- Lane 0 -->
+    <rect x="20" y="138" width="100" height="18" fill="none" stroke="#bbb"/>
+    <text x="70" y="151" text-anchor="middle">0</text>
+    <rect x="120" y="138" width="80" height="18" fill="none" stroke="#bbb"/>
+    <text x="160" y="151" text-anchor="middle">0</text>
+    <rect x="200" y="138" width="120" height="18" fill="none" stroke="#bbb"/>
+    <text x="260" y="151" text-anchor="middle">A[0, 0..15]</text>
+    <rect x="320" y="138" width="120" height="18" fill="none" stroke="#bbb"/>
+    <text x="380" y="151" text-anchor="middle">B[0..15, 0]</text>
+
+    <!-- Lane 1 -->
+    <rect x="20" y="156" width="100" height="18" fill="none" stroke="#bbb"/>
+    <text x="70" y="169" text-anchor="middle">1</text>
+    <rect x="120" y="156" width="80" height="18" fill="none" stroke="#bbb"/>
+    <text x="160" y="169" text-anchor="middle">1</text>
+    <rect x="200" y="156" width="120" height="18" fill="none" stroke="#bbb"/>
+    <text x="260" y="169" text-anchor="middle">A[1, 0..15]</text>
+    <rect x="320" y="156" width="120" height="18" fill="none" stroke="#bbb"/>
+    <text x="380" y="169" text-anchor="middle">B[0..15, 1]</text>
+
+    <!-- Lane 2 -->
+    <rect x="20" y="174" width="100" height="18" fill="none" stroke="#bbb"/>
+    <text x="70" y="187" text-anchor="middle">2</text>
+    <rect x="120" y="174" width="80" height="18" fill="none" stroke="#bbb"/>
+    <text x="160" y="187" text-anchor="middle">2</text>
+    <rect x="200" y="174" width="120" height="18" fill="none" stroke="#bbb"/>
+    <text x="260" y="187" text-anchor="middle">A[2, 0..15]</text>
+    <rect x="320" y="174" width="120" height="18" fill="none" stroke="#bbb"/>
+    <text x="380" y="187" text-anchor="middle">B[0..15, 2]</text>
+
+    <!-- Ellipsis -->
+    <text x="70" y="208" text-anchor="middle" fill="#888">...</text>
+    <text x="160" y="208" text-anchor="middle" fill="#888">...</text>
+    <text x="260" y="208" text-anchor="middle" fill="#888">...</text>
+    <text x="380" y="208" text-anchor="middle" fill="#888">...</text>
+
+    <!-- Lane 15 -->
+    <rect x="20" y="214" width="100" height="18" fill="none" stroke="#bbb"/>
+    <text x="70" y="227" text-anchor="middle">15</text>
+    <rect x="120" y="214" width="80" height="18" fill="none" stroke="#bbb"/>
+    <text x="160" y="227" text-anchor="middle">15</text>
+    <rect x="200" y="214" width="120" height="18" fill="none" stroke="#bbb"/>
+    <text x="260" y="227" text-anchor="middle">A[15, 0..15]</text>
+    <rect x="320" y="214" width="120" height="18" fill="none" stroke="#bbb"/>
+    <text x="380" y="227" text-anchor="middle">B[0..15, 15]</text>
+  </g>
+
+  <!-- Mirror zone: lanes 16-31 -->
+  <rect x="20" y="240" width="420" height="130" fill="#fff0f0" stroke="#e0b0b0" stroke-width="1.5"/>
+  <text x="260" y="254" text-anchor="middle" font-size="10" fill="#cc2200" font-weight="bold">Mirror zone (Lane 16–31) — identical register contents to lanes 0–15</text>
+  <g font-size="11" fill="#222">
+    <rect x="20" y="258" width="100" height="18" fill="none" stroke="#bbb"/>
+    <text x="70" y="271" text-anchor="middle">16</text>
+    <rect x="120" y="258" width="80" height="18" fill="none" stroke="#bbb"/>
+    <text x="160" y="271" text-anchor="middle">0</text>
+    <rect x="200" y="258" width="120" height="18" fill="#ffe8e8" stroke="#bbb"/>
+    <text x="260" y="271" text-anchor="middle">A[0, 0..15] ← copy</text>
+    <rect x="320" y="258" width="120" height="18" fill="#ffe8e8" stroke="#bbb"/>
+    <text x="380" y="271" text-anchor="middle">B[0..15, 0] ← copy</text>
+
+    <rect x="20" y="276" width="100" height="18" fill="none" stroke="#bbb"/>
+    <text x="70" y="289" text-anchor="middle">17</text>
+    <rect x="120" y="276" width="80" height="18" fill="none" stroke="#bbb"/>
+    <text x="160" y="289" text-anchor="middle">1</text>
+    <rect x="200" y="276" width="120" height="18" fill="#ffe8e8" stroke="#bbb"/>
+    <text x="260" y="289" text-anchor="middle">A[1, 0..15] ← copy</text>
+    <rect x="320" y="276" width="120" height="18" fill="#ffe8e8" stroke="#bbb"/>
+    <text x="380" y="289" text-anchor="middle">B[0..15, 1] ← copy</text>
+
+    <text x="70" y="313" text-anchor="middle" fill="#888">...</text>
+    <text x="160" y="313" text-anchor="middle" fill="#888">...</text>
+    <text x="260" y="313" text-anchor="middle" fill="#888">...</text>
+    <text x="380" y="313" text-anchor="middle" fill="#888">...</text>
+
+    <rect x="20" y="320" width="100" height="18" fill="none" stroke="#bbb"/>
+    <text x="70" y="333" text-anchor="middle">31</text>
+    <rect x="120" y="320" width="80" height="18" fill="none" stroke="#bbb"/>
+    <text x="160" y="333" text-anchor="middle">15</text>
+    <rect x="200" y="320" width="120" height="18" fill="#ffe8e8" stroke="#bbb"/>
+    <text x="260" y="333" text-anchor="middle">A[15, 0..15] ← copy</text>
+    <rect x="320" y="320" width="120" height="18" fill="#ffe8e8" stroke="#bbb"/>
+    <text x="380" y="333" text-anchor="middle">B[0..15, 15] ← copy</text>
+  </g>
+
+  <!-- ===== RIGHT: A matrix visual ===== -->
+  <text x="480" y="90" font-size="13" font-weight="bold" fill="#1a1a2e">Matrix A (column-major, 16×16)</text>
+  <text x="480" y="106" font-size="11" fill="#555">Each row is held by one lane's a_frag[0..15]</text>
+
+  <g transform="translate(480, 115)">
+    <text x="20" y="10" font-size="9" fill="#666">k →</text>
+    <text x="-2" y="30" font-size="9" fill="#666" text-anchor="end">m</text>
+    <text x="-2" y="60" font-size="9" fill="#666" text-anchor="end">↓</text>
+
+    <g font-size="7" text-anchor="middle">
+      <rect x="20" y="14" width="320" height="20" fill="#2196F3" opacity="0.8"/>
+      <text x="170" y="28" fill="white">row 0 → Lane 0 holds a_frag[0..15]</text>
+
+      <rect x="20" y="34" width="320" height="20" fill="#42A5F5" opacity="0.8"/>
+      <text x="170" y="48" fill="white">row 1 → Lane 1</text>
+
+      <rect x="20" y="54" width="320" height="20" fill="#64B5F6" opacity="0.8"/>
+      <text x="170" y="68" fill="#1a1a2e">row 2 → Lane 2</text>
+
+      <rect x="20" y="74" width="320" height="20" fill="#90CAF9" opacity="0.8"/>
+      <text x="170" y="88" fill="#1a1a2e">row 3 → Lane 3</text>
+
+      <rect x="20" y="94" width="320" height="20" fill="#BBDEFB" opacity="0.8"/>
+      <text x="170" y="108" fill="#1a1a2e">rows 4–11 → Lanes 4–11 (same pattern)</text>
+
+      <rect x="20" y="114" width="320" height="20" fill="#64B5F6" opacity="0.7"/>
+      <text x="170" y="128" fill="#1a1a2e">row 12 → Lane 12</text>
+
+      <rect x="20" y="134" width="320" height="20" fill="#42A5F5" opacity="0.7"/>
+      <text x="170" y="148" fill="white">row 13 → Lane 13</text>
+
+      <rect x="20" y="154" width="320" height="20" fill="#2196F3" opacity="0.7"/>
+      <text x="170" y="168" fill="white">row 14 → Lane 14</text>
+
+      <rect x="20" y="174" width="320" height="20" fill="#1565C0" opacity="0.8"/>
+      <text x="170" y="188" fill="white">row 15 → Lane 15</text>
+    </g>
+
+    <line x1="20" y1="12" x2="340" y2="12" stroke="#999" stroke-width="0.5"/>
+    <text x="20" y="10" font-size="8" fill="#666">k=0</text>
+    <text x="320" y="10" font-size="8" fill="#666" text-anchor="end">k=15</text>
+
+    <rect x="20" y="200" width="320" height="22" fill="#fff0f0" stroke="#e08080" rx="3"/>
+    <text x="180" y="215" text-anchor="middle" font-size="10" fill="#cc2200">Lanes 16–31 load the same data as lanes 0–15 (mirrored)</text>
+  </g>
+
+  <!-- ===== C/D accumulator note at bottom ===== -->
+  <rect x="20" y="388" width="820" height="112" fill="#f0f7ee" stroke="#a8d5a2" rx="5"/>
+  <text x="430" y="408" text-anchor="middle" font-size="13" font-weight="bold" fill="#2d6a27">C / D Accumulator Layout (FP32, Wave32)</text>
+  <text x="430" y="428" text-anchor="middle" font-size="11" fill="#333">Each output column is shared by two lanes: even rows → lane i, odd rows → lane i+16 (i = column index)</text>
+  <text x="430" y="448" text-anchor="middle" font-size="11" fill="#333">Each lane holds 8 floats (c_frag[0..7]) covering 8 rows of its column</text>
+
+  <g transform="translate(150, 456)">
+    <rect x="0" y="0" width="40" height="18" fill="#81C784" stroke="#388E3C"/>
+    <text x="20" y="13" text-anchor="middle" font-size="9" fill="#1a1a2e">row 0</text>
+    <rect x="40" y="0" width="40" height="18" fill="#c8e6c9" stroke="#388E3C"/>
+    <text x="60" y="13" text-anchor="middle" font-size="9" fill="#1a1a2e">row 1</text>
+    <rect x="80" y="0" width="40" height="18" fill="#81C784" stroke="#388E3C"/>
+    <text x="100" y="13" text-anchor="middle" font-size="9">row 2</text>
+    <rect x="120" y="0" width="40" height="18" fill="#c8e6c9" stroke="#388E3C"/>
+    <text x="140" y="13" text-anchor="middle" font-size="9">row 3</text>
+    <rect x="160" y="0" width="120" height="18" fill="#e8f5e9" stroke="#aaa" stroke-dasharray="3"/>
+    <text x="220" y="13" text-anchor="middle" font-size="9">rows 4–13 …</text>
+    <rect x="280" y="0" width="40" height="18" fill="#81C784" stroke="#388E3C"/>
+    <text x="300" y="13" text-anchor="middle" font-size="9">row 14</text>
+    <rect x="320" y="0" width="40" height="18" fill="#c8e6c9" stroke="#388E3C"/>
+    <text x="340" y="13" text-anchor="middle" font-size="9">row 15</text>
+
+    <rect x="380" y="0" width="12" height="12" fill="#81C784" stroke="#388E3C"/>
+    <text x="395" y="11" font-size="9" fill="#1a1a2e">even rows → lanes 0–15</text>
+    <rect x="380" y="16" width="12" height="12" fill="#c8e6c9" stroke="#388E3C"/>
+    <text x="395" y="27" font-size="9" fill="#1a1a2e">odd rows → lanes 16–31</text>
+  </g>
+</svg>

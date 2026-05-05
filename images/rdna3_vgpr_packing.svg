@@ -1,0 +1,160 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 480" font-family="monospace, sans-serif">
+  <!-- Background -->
+  <rect width="860" height="480" fill="#f8f9fa" rx="8"/>
+
+  <!-- Title -->
+  <text x="430" y="32" text-anchor="middle" font-size="16" font-weight="bold" fill="#1a1a2e">RDNA 3 Wave32 — A/B Operand VGPR Packing (FP16)</text>
+  <text x="430" y="52" text-anchor="middle" font-size="11" fill="#555">Each lane's a_frag holds 16 FP16 elements packed into 8 × 32-bit VGPRs (2 FP16 per VGPR)</text>
+
+  <!-- ===== Section 1: 32-bit VGPR layout ===== -->
+  <text x="20" y="80" font-size="13" font-weight="bold" fill="#1a1a2e">Inside one VGPR: two FP16 values packed into 32 bits</text>
+
+  <text x="20" y="104" font-size="11" fill="#333">VGPR[0] = a_frag[0..1] packed:</text>
+  <rect x="20" y="110" width="820" height="36" fill="#e3f2fd" stroke="#1565C0" rx="3"/>
+  <text x="20" y="108" font-size="8" fill="#888">bit 31</text>
+  <text x="815" y="108" font-size="8" fill="#888" text-anchor="end">bit 0</text>
+
+  <!-- High 16 bits -->
+  <rect x="20" y="110" width="410" height="36" fill="#42A5F5" stroke="#1565C0"/>
+  <text x="225" y="132" text-anchor="middle" font-size="12" fill="white" font-weight="bold">a_frag[1]  (high 16 bits, bit 31:16)</text>
+
+  <!-- Low 16 bits -->
+  <rect x="430" y="110" width="410" height="36" fill="#90CAF9" stroke="#1565C0"/>
+  <text x="635" y="132" text-anchor="middle" font-size="12" fill="#1a1a2e" font-weight="bold">a_frag[0]  (low 16 bits, bit 15:0)</text>
+
+  <line x1="430" y1="110" x2="430" y2="146" stroke="#1565C0" stroke-width="2" stroke-dasharray="4"/>
+  <text x="430" y="158" text-anchor="middle" font-size="9" fill="#1565C0">bit 16</text>
+
+  <!-- ===== Section 2: 8 VGPR slots ===== -->
+  <text x="20" y="185" font-size="13" font-weight="bold" fill="#1a1a2e">One lane's a_frag: 8 VGPRs holding 16 FP16 elements</text>
+  <text x="20" y="202" font-size="11" fill="#555">Lane t holds row t of matrix A (column-major: a_frag[k] = A[t, k], k=0..15)</text>
+
+  <g transform="translate(20, 210)">
+    <g>
+      <text x="0" y="18" font-size="10" fill="#333">VGPR[0]</text>
+      <rect x="70" y="2" width="90" height="22" fill="#42A5F5" stroke="#1565C0" rx="2"/>
+      <text x="115" y="17" text-anchor="middle" font-size="10" fill="white">A[t, 1]</text>
+      <rect x="160" y="2" width="90" height="22" fill="#90CAF9" stroke="#1565C0" rx="2"/>
+      <text x="205" y="17" text-anchor="middle" font-size="10" fill="#1a1a2e">A[t, 0]</text>
+    </g>
+    <g transform="translate(0, 28)">
+      <text x="0" y="18" font-size="10" fill="#333">VGPR[1]</text>
+      <rect x="70" y="2" width="90" height="22" fill="#42A5F5" stroke="#1565C0" rx="2"/>
+      <text x="115" y="17" text-anchor="middle" font-size="10" fill="white">A[t, 3]</text>
+      <rect x="160" y="2" width="90" height="22" fill="#90CAF9" stroke="#1565C0" rx="2"/>
+      <text x="205" y="17" text-anchor="middle" font-size="10" fill="#1a1a2e">A[t, 2]</text>
+    </g>
+    <g transform="translate(0, 56)">
+      <text x="0" y="18" font-size="10" fill="#333">VGPR[2]</text>
+      <rect x="70" y="2" width="90" height="22" fill="#42A5F5" stroke="#1565C0" rx="2"/>
+      <text x="115" y="17" text-anchor="middle" font-size="10" fill="white">A[t, 5]</text>
+      <rect x="160" y="2" width="90" height="22" fill="#90CAF9" stroke="#1565C0" rx="2"/>
+      <text x="205" y="17" text-anchor="middle" font-size="10" fill="#1a1a2e">A[t, 4]</text>
+    </g>
+    <g transform="translate(0, 84)">
+      <text x="0" y="18" font-size="10" fill="#333">VGPR[3]</text>
+      <rect x="70" y="2" width="90" height="22" fill="#42A5F5" stroke="#1565C0" rx="2"/>
+      <text x="115" y="17" text-anchor="middle" font-size="10" fill="white">A[t, 7]</text>
+      <rect x="160" y="2" width="90" height="22" fill="#90CAF9" stroke="#1565C0" rx="2"/>
+      <text x="205" y="17" text-anchor="middle" font-size="10" fill="#1a1a2e">A[t, 6]</text>
+    </g>
+    <g transform="translate(0, 112)">
+      <text x="0" y="18" font-size="10" fill="#333">VGPR[4]</text>
+      <rect x="70" y="2" width="90" height="22" fill="#42A5F5" stroke="#1565C0" rx="2"/>
+      <text x="115" y="17" text-anchor="middle" font-size="10" fill="white">A[t, 9]</text>
+      <rect x="160" y="2" width="90" height="22" fill="#90CAF9" stroke="#1565C0" rx="2"/>
+      <text x="205" y="17" text-anchor="middle" font-size="10" fill="#1a1a2e">A[t, 8]</text>
+    </g>
+    <g transform="translate(0, 140)">
+      <text x="0" y="18" font-size="10" fill="#333">VGPR[5]</text>
+      <rect x="70" y="2" width="90" height="22" fill="#42A5F5" stroke="#1565C0" rx="2"/>
+      <text x="115" y="17" text-anchor="middle" font-size="10" fill="white">A[t, 11]</text>
+      <rect x="160" y="2" width="90" height="22" fill="#90CAF9" stroke="#1565C0" rx="2"/>
+      <text x="205" y="17" text-anchor="middle" font-size="10" fill="#1a1a2e">A[t, 10]</text>
+    </g>
+    <g transform="translate(0, 168)">
+      <text x="0" y="18" font-size="10" fill="#333">VGPR[6]</text>
+      <rect x="70" y="2" width="90" height="22" fill="#42A5F5" stroke="#1565C0" rx="2"/>
+      <text x="115" y="17" text-anchor="middle" font-size="10" fill="white">A[t, 13]</text>
+      <rect x="160" y="2" width="90" height="22" fill="#90CAF9" stroke="#1565C0" rx="2"/>
+      <text x="205" y="17" text-anchor="middle" font-size="10" fill="#1a1a2e">A[t, 12]</text>
+    </g>
+    <g transform="translate(0, 196)">
+      <text x="0" y="18" font-size="10" fill="#333">VGPR[7]</text>
+      <rect x="70" y="2" width="90" height="22" fill="#42A5F5" stroke="#1565C0" rx="2"/>
+      <text x="115" y="17" text-anchor="middle" font-size="10" fill="white">A[t, 15]</text>
+      <rect x="160" y="2" width="90" height="22" fill="#90CAF9" stroke="#1565C0" rx="2"/>
+      <text x="205" y="17" text-anchor="middle" font-size="10" fill="#1a1a2e">A[t, 14]</text>
+    </g>
+
+    <!-- Brace annotation -->
+    <line x1="255" y1="2" x2="270" y2="2" stroke="#888" stroke-width="1"/>
+    <line x1="270" y1="2" x2="270" y2="214" stroke="#888" stroke-width="1"/>
+    <line x1="255" y1="214" x2="270" y2="214" stroke="#888" stroke-width="1"/>
+    <text x="280" y="80" font-size="11" fill="#333">8 VGPRs</text>
+    <text x="280" y="96" font-size="11" fill="#333">= 16 FP16</text>
+    <text x="280" y="112" font-size="11" fill="#333">= 256 bits</text>
+    <text x="280" y="128" font-size="10" fill="#555">(full row t of A,</text>
+    <text x="280" y="142" font-size="10" fill="#555"> k = 0..15)</text>
+  </g>
+
+  <!-- ===== Section 3: VGPR count comparison table ===== -->
+  <text x="520" y="185" font-size="13" font-weight="bold" fill="#1a1a2e">VGPR Count Comparison</text>
+
+  <!-- Table header -->
+  <rect x="520" y="193" width="130" height="24" fill="#c8d8f0" stroke="#aaa"/>
+  <text x="585" y="209" text-anchor="middle" font-size="11" font-weight="bold" fill="#222">Operand type</text>
+  <rect x="650" y="193" width="80" height="24" fill="#c8d8f0" stroke="#aaa"/>
+  <text x="690" y="209" text-anchor="middle" font-size="11" font-weight="bold" fill="#222">Wave32</text>
+  <rect x="730" y="193" width="80" height="24" fill="#c8d8f0" stroke="#aaa"/>
+  <text x="770" y="209" text-anchor="middle" font-size="11" font-weight="bold" fill="#222">Wave64</text>
+
+  <!-- FP16/BF16 A/B -->
+  <rect x="520" y="217" width="130" height="22" fill="#eaf4fb" stroke="#bbb"/>
+  <text x="585" y="232" text-anchor="middle" font-size="10" fill="#222">A/B (FP16/BF16)</text>
+  <rect x="650" y="217" width="80" height="22" fill="#eaf4fb" stroke="#bbb"/>
+  <text x="690" y="232" text-anchor="middle" font-size="11" fill="#1565C0" font-weight="bold">8 VGPRs</text>
+  <rect x="730" y="217" width="80" height="22" fill="#eaf4fb" stroke="#bbb"/>
+  <text x="770" y="232" text-anchor="middle" font-size="11" fill="#1565C0" font-weight="bold">8 VGPRs</text>
+
+  <!-- INT8 A/B -->
+  <rect x="520" y="239" width="130" height="22" fill="#f0f7ee" stroke="#bbb"/>
+  <text x="585" y="254" text-anchor="middle" font-size="10" fill="#222">A/B (INT8)</text>
+  <rect x="650" y="239" width="80" height="22" fill="#f0f7ee" stroke="#bbb"/>
+  <text x="690" y="254" text-anchor="middle" font-size="11" fill="#2e7d32" font-weight="bold">4 VGPRs</text>
+  <rect x="730" y="239" width="80" height="22" fill="#f0f7ee" stroke="#bbb"/>
+  <text x="770" y="254" text-anchor="middle" font-size="11" fill="#2e7d32" font-weight="bold">4 VGPRs</text>
+
+  <!-- INT4 A/B -->
+  <rect x="520" y="261" width="130" height="22" fill="#fff8e1" stroke="#bbb"/>
+  <text x="585" y="276" text-anchor="middle" font-size="10" fill="#222">A/B (INT4)</text>
+  <rect x="650" y="261" width="80" height="22" fill="#fff8e1" stroke="#bbb"/>
+  <text x="690" y="276" text-anchor="middle" font-size="11" fill="#e65100" font-weight="bold">2 VGPRs</text>
+  <rect x="730" y="261" width="80" height="22" fill="#fff8e1" stroke="#bbb"/>
+  <text x="770" y="276" text-anchor="middle" font-size="11" fill="#e65100" font-weight="bold">2 VGPRs</text>
+
+  <!-- Separator -->
+  <rect x="520" y="287" width="290" height="4" fill="#bbb"/>
+  <text x="585" y="308" font-size="11" font-weight="bold" fill="#1a1a2e">C/D accumulator (FP32/INT32)</text>
+
+  <!-- FP32 C/D -->
+  <rect x="520" y="315" width="130" height="22" fill="#e8eaf6" stroke="#bbb"/>
+  <text x="585" y="330" text-anchor="middle" font-size="10" fill="#222">C/D (FP32/INT32)</text>
+  <rect x="650" y="315" width="80" height="22" fill="#e8eaf6" stroke="#bbb"/>
+  <text x="690" y="330" text-anchor="middle" font-size="11" fill="#4527A0" font-weight="bold">8 VGPRs</text>
+  <rect x="730" y="315" width="80" height="22" fill="#e8eaf6" stroke="#bbb"/>
+  <text x="770" y="330" text-anchor="middle" font-size="11" fill="#4527A0" font-weight="bold">4 VGPRs</text>
+
+  <!-- Packed FP16/BF16 C/D -->
+  <rect x="520" y="337" width="130" height="22" fill="#fce4ec" stroke="#bbb"/>
+  <text x="585" y="352" text-anchor="middle" font-size="10" fill="#222">C/D (packed FP16)</text>
+  <rect x="650" y="337" width="80" height="22" fill="#fce4ec" stroke="#bbb"/>
+  <text x="690" y="352" text-anchor="middle" font-size="11" fill="#880E4F" font-weight="bold">4 VGPRs</text>
+  <rect x="730" y="337" width="80" height="22" fill="#fce4ec" stroke="#bbb"/>
+  <text x="770" y="352" text-anchor="middle" font-size="11" fill="#880E4F" font-weight="bold">2 VGPRs</text>
+
+  <!-- Footer note -->
+  <rect x="20" y="430" width="820" height="38" fill="#fff3e0" stroke="#FF8F00" rx="4"/>
+  <text x="430" y="448" text-anchor="middle" font-size="11" fill="#E65100">A/B: same VGPR count for Wave32 and Wave64 — lanes 16–31 mirror 0–15, so unique inputs remain 16 rows/cols.</text>
+  <text x="430" y="462" text-anchor="middle" font-size="11" fill="#E65100">C/D: Wave64 halves the count — 64 distinct lanes each own fewer output rows.</text>
+</svg>

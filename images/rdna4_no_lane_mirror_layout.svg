@@ -1,0 +1,327 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 830" font-family="monospace, sans-serif">
+
+  <!-- Background -->
+  <rect width="960" height="830" fill="#f8f9fa" rx="8"/>
+
+  <!-- ===== TITLE ===== -->
+  <text x="480" y="30" text-anchor="middle" font-size="17" font-weight="bold" fill="#1a1a2e">RDNA 4 (GFX12) Wave32 — Register Layout: No Lane Mirroring</text>
+  <text x="480" y="49" text-anchor="middle" font-size="12" fill="#555">FP16 input → FP32 accumulator, 16×16×16 tile · All 32 lanes carry distinct operand data</text>
+
+  <!-- ================================================================ -->
+  <!-- LEFT PANEL: RDNA 4 Lane Table  (x=18..452, y=58..382)           -->
+  <!-- ================================================================ -->
+
+  <!-- Panel border -->
+  <rect x="18" y="58" width="434" height="330" fill="#f0f9f0" stroke="#2d6a27" rx="4" stroke-width="1.2"/>
+
+  <!-- Column header row -->
+  <rect x="18"  y="58" width="62"  height="26" fill="#c8d8f0" stroke="#9ab" rx="2"/>
+  <text x="49"  y="75" text-anchor="middle" font-size="12" font-weight="bold" fill="#1a1a2e">Lane</text>
+  <rect x="80"  y="58" width="76"  height="26" fill="#c8d8f0" stroke="#9ab" rx="2"/>
+  <text x="118" y="75" text-anchor="middle" font-size="12" font-weight="bold" fill="#1a1a2e">K range</text>
+  <rect x="156" y="58" width="148" height="26" fill="#c8d8f0" stroke="#9ab" rx="2"/>
+  <text x="230" y="75" text-anchor="middle" font-size="12" font-weight="bold" fill="#1a1a2e">a_frag[e] ← Matrix A</text>
+  <rect x="304" y="58" width="148" height="26" fill="#c8d8f0" stroke="#9ab" rx="2"/>
+  <text x="378" y="75" text-anchor="middle" font-size="12" font-weight="bold" fill="#1a1a2e">b_frag[e] ← Matrix B</text>
+
+  <!-- Group 1: Lanes 0-15, K = 0..7 -->
+  <rect x="18" y="84" width="434" height="24" fill="#d4edda" stroke="#2d6a27"/>
+  <text x="235" y="100" text-anchor="middle" font-size="11" font-weight="bold" fill="#2d6a27">Lanes 0–15  ·  K = 0..7  ·  8 unique FP16 values per lane</text>
+
+  <!-- Lane 0 -->
+  <rect x="18"  y="108" width="62"  height="22" fill="#eafaf1" stroke="#ccc"/>
+  <text x="49"  y="123" text-anchor="middle" font-size="12" fill="#1a1a2e">0</text>
+  <rect x="80"  y="108" width="76"  height="22" fill="#eafaf1" stroke="#ccc"/>
+  <text x="118" y="123" text-anchor="middle" font-size="11" fill="#2d6a27">k = 0..7</text>
+  <rect x="156" y="108" width="148" height="22" fill="#eafaf1" stroke="#ccc"/>
+  <text x="230" y="123" text-anchor="middle" font-size="11" fill="#333">A[row 0, k=0..7]</text>
+  <rect x="304" y="108" width="148" height="22" fill="#eafaf1" stroke="#ccc"/>
+  <text x="378" y="123" text-anchor="middle" font-size="11" fill="#333">B[k=0..7, col 0]</text>
+
+  <!-- Lane 1 -->
+  <rect x="18"  y="130" width="62"  height="22" fill="#f5fffa" stroke="#ccc"/>
+  <text x="49"  y="145" text-anchor="middle" font-size="12" fill="#1a1a2e">1</text>
+  <rect x="80"  y="130" width="76"  height="22" fill="#f5fffa" stroke="#ccc"/>
+  <text x="118" y="145" text-anchor="middle" font-size="11" fill="#2d6a27">k = 0..7</text>
+  <rect x="156" y="130" width="148" height="22" fill="#f5fffa" stroke="#ccc"/>
+  <text x="230" y="145" text-anchor="middle" font-size="11" fill="#333">A[row 1, k=0..7]</text>
+  <rect x="304" y="130" width="148" height="22" fill="#f5fffa" stroke="#ccc"/>
+  <text x="378" y="145" text-anchor="middle" font-size="11" fill="#333">B[k=0..7, col 1]</text>
+
+  <!-- Lane 2 -->
+  <rect x="18"  y="152" width="62"  height="22" fill="#eafaf1" stroke="#ccc"/>
+  <text x="49"  y="167" text-anchor="middle" font-size="12" fill="#1a1a2e">2</text>
+  <rect x="80"  y="152" width="76"  height="22" fill="#eafaf1" stroke="#ccc"/>
+  <text x="118" y="167" text-anchor="middle" font-size="11" fill="#2d6a27">k = 0..7</text>
+  <rect x="156" y="152" width="148" height="22" fill="#eafaf1" stroke="#ccc"/>
+  <text x="230" y="167" text-anchor="middle" font-size="11" fill="#333">A[row 2, k=0..7]</text>
+  <rect x="304" y="152" width="148" height="22" fill="#eafaf1" stroke="#ccc"/>
+  <text x="378" y="167" text-anchor="middle" font-size="11" fill="#333">B[k=0..7, col 2]</text>
+
+  <!-- Ellipsis -->
+  <rect x="18"  y="174" width="434" height="16" fill="#f9fff9" stroke="#ddd"/>
+  <text x="235" y="186" text-anchor="middle" font-size="12" fill="#999">⋮  (lanes 3–14 follow the same pattern)  ⋮</text>
+
+  <!-- Lane 15 -->
+  <rect x="18"  y="190" width="62"  height="22" fill="#eafaf1" stroke="#ccc"/>
+  <text x="49"  y="205" text-anchor="middle" font-size="12" fill="#1a1a2e">15</text>
+  <rect x="80"  y="190" width="76"  height="22" fill="#eafaf1" stroke="#ccc"/>
+  <text x="118" y="205" text-anchor="middle" font-size="11" fill="#2d6a27">k = 0..7</text>
+  <rect x="156" y="190" width="148" height="22" fill="#eafaf1" stroke="#ccc"/>
+  <text x="230" y="205" text-anchor="middle" font-size="11" fill="#333">A[row 15, k=0..7]</text>
+  <rect x="304" y="190" width="148" height="22" fill="#eafaf1" stroke="#ccc"/>
+  <text x="378" y="205" text-anchor="middle" font-size="11" fill="#333">B[k=0..7, col 15]</text>
+
+  <!-- Group 2: Lanes 16-31, K = 8..15, unique NOT mirrors -->
+  <rect x="18" y="218" width="434" height="24" fill="#b2dfdb" stroke="#00796b"/>
+  <text x="235" y="234" text-anchor="middle" font-size="11" font-weight="bold" fill="#004d40">Lanes 16–31  ·  K = 8..15  ·  8 unique FP16 values per lane  (NOT mirrors)</text>
+
+  <!-- Lane 16 -->
+  <rect x="18"  y="242" width="62"  height="22" fill="#e0f2f1" stroke="#ccc"/>
+  <text x="49"  y="257" text-anchor="middle" font-size="12" fill="#1a1a2e">16</text>
+  <rect x="80"  y="242" width="76"  height="22" fill="#e0f2f1" stroke="#ccc"/>
+  <text x="118" y="257" text-anchor="middle" font-size="11" fill="#00796b">k = 8..15</text>
+  <rect x="156" y="242" width="148" height="22" fill="#e0f2f1" stroke="#ccc"/>
+  <text x="230" y="257" text-anchor="middle" font-size="11" fill="#333">A[row 0, k=8..15]</text>
+  <rect x="304" y="242" width="148" height="22" fill="#e0f2f1" stroke="#ccc"/>
+  <text x="378" y="257" text-anchor="middle" font-size="11" fill="#333">B[k=8..15, col 0]</text>
+
+  <!-- Lane 17 -->
+  <rect x="18"  y="264" width="62"  height="22" fill="#f0fffe" stroke="#ccc"/>
+  <text x="49"  y="279" text-anchor="middle" font-size="12" fill="#1a1a2e">17</text>
+  <rect x="80"  y="264" width="76"  height="22" fill="#f0fffe" stroke="#ccc"/>
+  <text x="118" y="279" text-anchor="middle" font-size="11" fill="#00796b">k = 8..15</text>
+  <rect x="156" y="264" width="148" height="22" fill="#f0fffe" stroke="#ccc"/>
+  <text x="230" y="279" text-anchor="middle" font-size="11" fill="#333">A[row 1, k=8..15]</text>
+  <rect x="304" y="264" width="148" height="22" fill="#f0fffe" stroke="#ccc"/>
+  <text x="378" y="279" text-anchor="middle" font-size="11" fill="#333">B[k=8..15, col 1]</text>
+
+  <!-- Lane 18 -->
+  <rect x="18"  y="286" width="62"  height="22" fill="#e0f2f1" stroke="#ccc"/>
+  <text x="49"  y="301" text-anchor="middle" font-size="12" fill="#1a1a2e">18</text>
+  <rect x="80"  y="286" width="76"  height="22" fill="#e0f2f1" stroke="#ccc"/>
+  <text x="118" y="301" text-anchor="middle" font-size="11" fill="#00796b">k = 8..15</text>
+  <rect x="156" y="286" width="148" height="22" fill="#e0f2f1" stroke="#ccc"/>
+  <text x="230" y="301" text-anchor="middle" font-size="11" fill="#333">A[row 2, k=8..15]</text>
+  <rect x="304" y="286" width="148" height="22" fill="#e0f2f1" stroke="#ccc"/>
+  <text x="378" y="301" text-anchor="middle" font-size="11" fill="#333">B[k=8..15, col 2]</text>
+
+  <!-- Ellipsis -->
+  <rect x="18"  y="308" width="434" height="16" fill="#f5fffe" stroke="#ddd"/>
+  <text x="235" y="320" text-anchor="middle" font-size="12" fill="#999">⋮  (lanes 19–30 follow the same pattern)  ⋮</text>
+
+  <!-- Lane 31 -->
+  <rect x="18"  y="324" width="62"  height="22" fill="#e0f2f1" stroke="#ccc"/>
+  <text x="49"  y="339" text-anchor="middle" font-size="12" fill="#1a1a2e">31</text>
+  <rect x="80"  y="324" width="76"  height="22" fill="#e0f2f1" stroke="#ccc"/>
+  <text x="118" y="339" text-anchor="middle" font-size="11" fill="#00796b">k = 8..15</text>
+  <rect x="156" y="324" width="148" height="22" fill="#e0f2f1" stroke="#ccc"/>
+  <text x="230" y="339" text-anchor="middle" font-size="11" fill="#333">A[row 15, k=8..15]</text>
+  <rect x="304" y="324" width="148" height="22" fill="#e0f2f1" stroke="#ccc"/>
+  <text x="378" y="339" text-anchor="middle" font-size="11" fill="#333">B[k=8..15, col 15]</text>
+
+  <!-- Footer note -->
+  <rect x="18" y="352" width="434" height="24" fill="#d4edda" stroke="#2d6a27" rx="3"/>
+  <text x="235" y="368" text-anchor="middle" font-size="11" font-weight="bold" fill="#2d6a27">✓ All 32 lanes carry unique operand data — no wasted registers</text>
+
+  <!-- ================================================================ -->
+  <!-- RIGHT PANEL: GFX12 Formulas + Key Insight  (x=460..942, y=58..382) -->
+  <!-- ================================================================ -->
+
+  <!-- Formulas box (y=58 .. y=336, h=278) -->
+  <rect x="460" y="58" width="482" height="278" fill="#f0f4ff" stroke="#8899cc" rx="5"/>
+  <text x="701" y="78" text-anchor="middle" font-size="13" font-weight="bold" fill="#1a1a2e">GFX12 Lane Index Formulas</text>
+  <text x="701" y="94" text-anchor="middle" font-size="11" fill="#666">Wave32 · 16×16×16 · FP16→FP32</text>
+
+  <!-- A/B operand formulas -->
+  <text x="470" y="116" font-size="12" font-weight="bold" fill="#1a1a2e">A / B Operand  (a_frag, b_frag — 8 FP16 per lane):</text>
+  <rect x="470" y="122" width="462" height="70" fill="#ffffff" stroke="#8899cc" rx="3"/>
+  <text x="480" y="139" font-size="12" fill="#333">mn  = lane % 16          // m-row for A, n-col for B (same index)</text>
+  <text x="480" y="157" font-size="12" fill="#333">k   = (lane / 16) * 8 + e   // e = 0..7  (fragment slot)</text>
+  <text x="480" y="175" font-size="12" fill="#333">a_frag[e] = A[k * 16 + mn]  // A: column-major</text>
+  <text x="480" y="191" font-size="12" fill="#333">b_frag[e] = B[k * 16 + mn]  // B: row-major</text>
+
+  <!-- K-range split boxes -->
+  <text x="470" y="212" font-size="12" font-weight="bold" fill="#1a1a2e">K-range split:</text>
+  <rect x="560" y="200" width="172" height="38" fill="#eafaf1" stroke="#2d6a27" rx="3"/>
+  <text x="646" y="215" text-anchor="middle" font-size="12" fill="#2d6a27">Lanes 0–15</text>
+  <text x="646" y="231" text-anchor="middle" font-size="12" fill="#2d6a27">K = 0..7  (lane/16 = 0)</text>
+  <rect x="742" y="200" width="190" height="38" fill="#e0f2f1" stroke="#00796b" rx="3"/>
+  <text x="837" y="215" text-anchor="middle" font-size="12" fill="#00796b">Lanes 16–31</text>
+  <text x="837" y="231" text-anchor="middle" font-size="12" fill="#00796b">K = 8..15  (lane/16 = 1)</text>
+
+  <!-- C/D accumulator formulas -->
+  <text x="470" y="256" font-size="12" font-weight="bold" fill="#1a1a2e">C / D Accumulator  (c_frag, d_frag — 8 FP32 per lane):</text>
+  <rect x="470" y="262" width="462" height="62" fill="#ffffff" stroke="#8899cc" rx="3"/>
+  <text x="480" y="279" font-size="12" fill="#333">m = (lane / 16) * 8 + e   // e = 0..7</text>
+  <text x="480" y="297" font-size="12" fill="#333">n = lane % 16</text>
+  <text x="480" y="315" font-size="12" fill="#333">c_frag[e] = C[m * 16 + n]  // row-major</text>
+
+  <!-- Key Insight box (y=346 .. y=392, below formula box) -->
+  <rect x="460" y="346" width="482" height="90" fill="#fffde7" stroke="#f9a825" rx="5"/>
+  <text x="701" y="364" text-anchor="middle" font-size="12" font-weight="bold" fill="#795548">⚠  Key Pitfall: A/B layout ≠ D/C layout</text>
+  <text x="470" y="381" font-size="11" fill="#555">A/B: lane%16 = m-row for A  /  n-col for B  (K axis split by lane/16)</text>
+  <text x="470" y="397" font-size="11" fill="#555">D/C: lane%16 = n-col for D  /  m-row axis split by lane/16 instead</text>
+  <text x="470" y="414" font-size="11" fill="#795548">→ Chained WMMA (MLP): must store D to shared memory, then reload as B.</text>
+  <text x="470" y="430" font-size="11" fill="#795548">   lane%16 maps to different dimensions in the two layouts.</text>
+
+  <!-- ================================================================ -->
+  <!-- BOTTOM: Large Matrix A heat-map  (y=396..752)                   -->
+  <!-- ================================================================ -->
+
+  <text x="480" y="452" text-anchor="middle" font-size="14" font-weight="bold" fill="#1a1a2e">Matrix A (16×16, Column-Major) — Lane Coverage Map</text>
+  <text x="480" y="469" text-anchor="middle" font-size="11" fill="#555">Row m is covered by Lane m (k=0..7) and Lane m+16 (k=8..15). Each lane holds 8 unique FP16 values (half8_t).</text>
+
+  <!-- K-axis group header bars -->
+  <!-- row-m label column: x=18..80 -->
+  <!-- left  half: x=80..510  (K=0..7,  Lanes 0–15) -->
+  <!-- right half: x=510..940 (K=8..15, Lanes 16–31) -->
+
+  <!-- K group header -->
+  <rect x="80"  y="478" width="430" height="22" fill="#81C784" stroke="#388E3C"/>
+  <text x="295" y="493" text-anchor="middle" font-size="12" font-weight="bold" fill="white">K = 0..7  (Lanes 0–15 load these columns)</text>
+  <rect x="510" y="478" width="430" height="22" fill="#4DB6AC" stroke="#00796b"/>
+  <text x="725" y="493" text-anchor="middle" font-size="12" font-weight="bold" fill="white">K = 8..15  (Lanes 16–31 load these columns)</text>
+
+  <!-- k-axis ticks -->
+  <text x="80"  y="476" font-size="10" fill="#666">k=0</text>
+  <text x="290" y="476" text-anchor="middle" font-size="10" fill="#666">k=7</text>
+  <text x="515" y="476" font-size="10" fill="#666">k=8</text>
+  <text x="930" y="476" text-anchor="end" font-size="10" fill="#666">k=15</text>
+  <text x="18"  y="492" font-size="10" fill="#666" text-anchor="middle">m</text>
+  <!-- K split marker -->
+  <line x1="510" y1="478" x2="510" y2="806" stroke="#cc6600" stroke-width="1.5" stroke-dasharray="6,3"/>
+
+  <!-- Matrix rows — each row height = 18px, starts at y=518 -->
+  <!-- Row m=0 -->
+  <rect x="18"  y="518" width="62" height="18" fill="#f0f0f0" stroke="#ddd"/>
+  <text x="49"  y="531" text-anchor="middle" font-size="11" fill="#444">m=0</text>
+  <rect x="80"  y="518" width="430" height="18" fill="#a5d6a7" stroke="#ccc"/>
+  <text x="295" y="531" text-anchor="middle" font-size="11" fill="#1b5e20">Lane 0  ·  a_frag[e] = A[e·16 + 0],  e=0..7  (k=0..7)</text>
+  <rect x="510" y="518" width="430" height="18" fill="#80cbc4" stroke="#ccc"/>
+  <text x="725" y="531" text-anchor="middle" font-size="11" fill="#004d40">Lane 16  ·  a_frag[e] = A[(8+e)·16 + 0],  e=0..7  (k=8..15)</text>
+
+  <!-- Row m=1 -->
+  <rect x="18"  y="536" width="62" height="18" fill="#f8f8f8" stroke="#ddd"/>
+  <text x="49"  y="549" text-anchor="middle" font-size="11" fill="#444">m=1</text>
+  <rect x="80"  y="536" width="430" height="18" fill="#c8e6c9" stroke="#ccc"/>
+  <text x="295" y="549" text-anchor="middle" font-size="11" fill="#1b5e20">Lane 1  ·  a_frag[e] = A[e·16 + 1],  e=0..7  (k=0..7)</text>
+  <rect x="510" y="536" width="430" height="18" fill="#b2dfdb" stroke="#ccc"/>
+  <text x="725" y="549" text-anchor="middle" font-size="11" fill="#004d40">Lane 17  ·  a_frag[e] = A[(8+e)·16 + 1],  e=0..7  (k=8..15)</text>
+
+  <!-- Row m=2 -->
+  <rect x="18"  y="554" width="62" height="18" fill="#f0f0f0" stroke="#ddd"/>
+  <text x="49"  y="567" text-anchor="middle" font-size="11" fill="#444">m=2</text>
+  <rect x="80"  y="554" width="430" height="18" fill="#a5d6a7" stroke="#ccc"/>
+  <text x="295" y="567" text-anchor="middle" font-size="11" fill="#1b5e20">Lane 2  ·  a_frag[e] = A[e·16 + 2],  e=0..7  (k=0..7)</text>
+  <rect x="510" y="554" width="430" height="18" fill="#80cbc4" stroke="#ccc"/>
+  <text x="725" y="567" text-anchor="middle" font-size="11" fill="#004d40">Lane 18  ·  a_frag[e] = A[(8+e)·16 + 2],  e=0..7  (k=8..15)</text>
+
+  <!-- Row m=3 -->
+  <rect x="18"  y="572" width="62" height="18" fill="#f8f8f8" stroke="#ddd"/>
+  <text x="49"  y="585" text-anchor="middle" font-size="11" fill="#444">m=3</text>
+  <rect x="80"  y="572" width="430" height="18" fill="#c8e6c9" stroke="#ccc"/>
+  <text x="295" y="585" text-anchor="middle" font-size="11" fill="#1b5e20">Lane 3  ·  a_frag[e] = A[e·16 + 3],  e=0..7  (k=0..7)</text>
+  <rect x="510" y="572" width="430" height="18" fill="#b2dfdb" stroke="#ccc"/>
+  <text x="725" y="585" text-anchor="middle" font-size="11" fill="#004d40">Lane 19  ·  a_frag[e] = A[(8+e)·16 + 3],  e=0..7  (k=8..15)</text>
+
+  <!-- Row m=4 -->
+  <rect x="18"  y="590" width="62" height="18" fill="#f0f0f0" stroke="#ddd"/>
+  <text x="49"  y="603" text-anchor="middle" font-size="11" fill="#444">m=4</text>
+  <rect x="80"  y="590" width="430" height="18" fill="#a5d6a7" stroke="#ccc"/>
+  <text x="295" y="603" text-anchor="middle" font-size="11" fill="#1b5e20">Lane 4  ·  a_frag[e] = A[e·16 + 4],  e=0..7  (k=0..7)</text>
+  <rect x="510" y="590" width="430" height="18" fill="#80cbc4" stroke="#ccc"/>
+  <text x="725" y="603" text-anchor="middle" font-size="11" fill="#004d40">Lane 20  ·  a_frag[e] = A[(8+e)·16 + 4],  e=0..7  (k=8..15)</text>
+
+  <!-- Row m=5 -->
+  <rect x="18"  y="608" width="62" height="18" fill="#f8f8f8" stroke="#ddd"/>
+  <text x="49"  y="621" text-anchor="middle" font-size="11" fill="#444">m=5</text>
+  <rect x="80"  y="608" width="430" height="18" fill="#c8e6c9" stroke="#ccc"/>
+  <text x="295" y="621" text-anchor="middle" font-size="11" fill="#1b5e20">Lane 5  ·  a_frag[e] = A[e·16 + 5],  e=0..7  (k=0..7)</text>
+  <rect x="510" y="608" width="430" height="18" fill="#b2dfdb" stroke="#ccc"/>
+  <text x="725" y="621" text-anchor="middle" font-size="11" fill="#004d40">Lane 21  ·  a_frag[e] = A[(8+e)·16 + 5],  e=0..7  (k=8..15)</text>
+
+  <!-- Row m=6 -->
+  <rect x="18"  y="626" width="62" height="18" fill="#f0f0f0" stroke="#ddd"/>
+  <text x="49"  y="639" text-anchor="middle" font-size="11" fill="#444">m=6</text>
+  <rect x="80"  y="626" width="430" height="18" fill="#a5d6a7" stroke="#ccc"/>
+  <text x="295" y="639" text-anchor="middle" font-size="11" fill="#1b5e20">Lane 6  ·  a_frag[e] = A[e·16 + 6],  e=0..7  (k=0..7)</text>
+  <rect x="510" y="626" width="430" height="18" fill="#80cbc4" stroke="#ccc"/>
+  <text x="725" y="639" text-anchor="middle" font-size="11" fill="#004d40">Lane 22  ·  a_frag[e] = A[(8+e)·16 + 6],  e=0..7  (k=8..15)</text>
+
+  <!-- Row m=7 -->
+  <rect x="18"  y="644" width="62" height="18" fill="#f8f8f8" stroke="#ddd"/>
+  <text x="49"  y="657" text-anchor="middle" font-size="11" fill="#444">m=7</text>
+  <rect x="80"  y="644" width="430" height="18" fill="#c8e6c9" stroke="#ccc"/>
+  <text x="295" y="657" text-anchor="middle" font-size="11" fill="#1b5e20">Lane 7  ·  a_frag[e] = A[e·16 + 7],  e=0..7  (k=0..7)</text>
+  <rect x="510" y="644" width="430" height="18" fill="#b2dfdb" stroke="#ccc"/>
+  <text x="725" y="657" text-anchor="middle" font-size="11" fill="#004d40">Lane 23  ·  a_frag[e] = A[(8+e)·16 + 7],  e=0..7  (k=8..15)</text>
+
+  <!-- Row m=8 -->
+  <rect x="18"  y="662" width="62" height="18" fill="#f0f0f0" stroke="#ddd"/>
+  <text x="49"  y="675" text-anchor="middle" font-size="11" fill="#444">m=8</text>
+  <rect x="80"  y="662" width="430" height="18" fill="#a5d6a7" stroke="#ccc"/>
+  <text x="295" y="675" text-anchor="middle" font-size="11" fill="#1b5e20">Lane 8  ·  a_frag[e] = A[e·16 + 8],  e=0..7  (k=0..7)</text>
+  <rect x="510" y="662" width="430" height="18" fill="#80cbc4" stroke="#ccc"/>
+  <text x="725" y="675" text-anchor="middle" font-size="11" fill="#004d40">Lane 24  ·  a_frag[e] = A[(8+e)·16 + 8],  e=0..7  (k=8..15)</text>
+
+  <!-- Row m=9 -->
+  <rect x="18"  y="680" width="62" height="18" fill="#f8f8f8" stroke="#ddd"/>
+  <text x="49"  y="693" text-anchor="middle" font-size="11" fill="#444">m=9</text>
+  <rect x="80"  y="680" width="430" height="18" fill="#c8e6c9" stroke="#ccc"/>
+  <text x="295" y="693" text-anchor="middle" font-size="11" fill="#1b5e20">Lane 9  ·  a_frag[e] = A[e·16 + 9],  e=0..7  (k=0..7)</text>
+  <rect x="510" y="680" width="430" height="18" fill="#b2dfdb" stroke="#ccc"/>
+  <text x="725" y="693" text-anchor="middle" font-size="11" fill="#004d40">Lane 25  ·  a_frag[e] = A[(8+e)·16 + 9],  e=0..7  (k=8..15)</text>
+
+  <!-- Row m=10 -->
+  <rect x="18"  y="698" width="62" height="18" fill="#f0f0f0" stroke="#ddd"/>
+  <text x="49"  y="711" text-anchor="middle" font-size="11" fill="#444">m=10</text>
+  <rect x="80"  y="698" width="430" height="18" fill="#a5d6a7" stroke="#ccc"/>
+  <text x="295" y="711" text-anchor="middle" font-size="11" fill="#1b5e20">Lane 10  ·  a_frag[e] = A[e·16 + 10],  e=0..7  (k=0..7)</text>
+  <rect x="510" y="698" width="430" height="18" fill="#80cbc4" stroke="#ccc"/>
+  <text x="725" y="711" text-anchor="middle" font-size="11" fill="#004d40">Lane 26  ·  a_frag[e] = A[(8+e)·16 + 10],  e=0..7  (k=8..15)</text>
+
+  <!-- Row m=11 -->
+  <rect x="18"  y="716" width="62" height="18" fill="#f8f8f8" stroke="#ddd"/>
+  <text x="49"  y="729" text-anchor="middle" font-size="11" fill="#444">m=11</text>
+  <rect x="80"  y="716" width="430" height="18" fill="#c8e6c9" stroke="#ccc"/>
+  <text x="295" y="729" text-anchor="middle" font-size="11" fill="#1b5e20">Lane 11  ·  a_frag[e] = A[e·16 + 11],  e=0..7  (k=0..7)</text>
+  <rect x="510" y="716" width="430" height="18" fill="#b2dfdb" stroke="#ccc"/>
+  <text x="725" y="729" text-anchor="middle" font-size="11" fill="#004d40">Lane 27  ·  a_frag[e] = A[(8+e)·16 + 11],  e=0..7  (k=8..15)</text>
+
+  <!-- Row m=12 -->
+  <rect x="18"  y="734" width="62" height="18" fill="#f0f0f0" stroke="#ddd"/>
+  <text x="49"  y="747" text-anchor="middle" font-size="11" fill="#444">m=12</text>
+  <rect x="80"  y="734" width="430" height="18" fill="#a5d6a7" stroke="#ccc"/>
+  <text x="295" y="747" text-anchor="middle" font-size="11" fill="#1b5e20">Lane 12  ·  a_frag[e] = A[e·16 + 12],  e=0..7  (k=0..7)</text>
+  <rect x="510" y="734" width="430" height="18" fill="#80cbc4" stroke="#ccc"/>
+  <text x="725" y="747" text-anchor="middle" font-size="11" fill="#004d40">Lane 28  ·  a_frag[e] = A[(8+e)·16 + 12],  e=0..7  (k=8..15)</text>
+
+  <!-- Row m=13 -->
+  <rect x="18"  y="752" width="62" height="18" fill="#f8f8f8" stroke="#ddd"/>
+  <text x="49"  y="765" text-anchor="middle" font-size="11" fill="#444">m=13</text>
+  <rect x="80"  y="752" width="430" height="18" fill="#c8e6c9" stroke="#ccc"/>
+  <text x="295" y="765" text-anchor="middle" font-size="11" fill="#1b5e20">Lane 13  ·  a_frag[e] = A[e·16 + 13],  e=0..7  (k=0..7)</text>
+  <rect x="510" y="752" width="430" height="18" fill="#b2dfdb" stroke="#ccc"/>
+  <text x="725" y="765" text-anchor="middle" font-size="11" fill="#004d40">Lane 29  ·  a_frag[e] = A[(8+e)·16 + 13],  e=0..7  (k=8..15)</text>
+
+  <!-- Row m=14 -->
+  <rect x="18"  y="770" width="62" height="18" fill="#f0f0f0" stroke="#ddd"/>
+  <text x="49"  y="783" text-anchor="middle" font-size="11" fill="#444">m=14</text>
+  <rect x="80"  y="770" width="430" height="18" fill="#a5d6a7" stroke="#ccc"/>
+  <text x="295" y="783" text-anchor="middle" font-size="11" fill="#1b5e20">Lane 14  ·  a_frag[e] = A[e·16 + 14],  e=0..7  (k=0..7)</text>
+  <rect x="510" y="770" width="430" height="18" fill="#80cbc4" stroke="#ccc"/>
+  <text x="725" y="783" text-anchor="middle" font-size="11" fill="#004d40">Lane 30  ·  a_frag[e] = A[(8+e)·16 + 14],  e=0..7  (k=8..15)</text>
+
+  <!-- Row m=15 -->
+  <rect x="18"  y="788" width="62" height="18" fill="#f8f8f8" stroke="#ddd"/>
+  <text x="49"  y="801" text-anchor="middle" font-size="11" fill="#444">m=15</text>
+  <rect x="80"  y="788" width="430" height="18" fill="#66bb6a" stroke="#388E3C"/>
+  <text x="295" y="801" text-anchor="middle" font-size="11" font-weight="bold" fill="#1b5e20">Lane 15  ·  a_frag[e] = A[e·16 + 15],  e=0..7  (k=0..7)</text>
+  <rect x="510" y="788" width="430" height="18" fill="#26a69a" stroke="#00796b"/>
+  <text x="725" y="801" text-anchor="middle" font-size="11" font-weight="bold" fill="white">Lane 31  ·  a_frag[e] = A[(8+e)·16 + 15],  e=0..7  (k=8..15)</text>
+
+  <!-- Outer border for matrix -->
+  <rect x="18" y="478" width="924" height="330" fill="none" stroke="#888" stroke-width="1"/>
+
+</svg>
