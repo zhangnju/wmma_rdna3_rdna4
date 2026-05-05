@@ -33,8 +33,8 @@ __global__ void wmma_lane_mapping_kernel(
     //   k  = (lane / 16)*8 + e  (K offset, e=0..7)
     //   A is column-major: A[k][m] stored at A[k*16 + m]
     // ------------------------------------------------------------------
-    using half8  = __attribute__((__vector_size__(8  * sizeof(__fp16))))  __fp16;
-    using float8 = __attribute__((__vector_size__(8  * sizeof(float))))   float;
+    typedef __attribute__((ext_vector_type(8))) _Float16 half8;
+    typedef __attribute__((ext_vector_type(8))) float    float8;
 
     int mn       = lane % 16;
     int k_base   = (lane / 16) * 8;
@@ -43,9 +43,9 @@ __global__ void wmma_lane_mapping_kernel(
     for (int e = 0; e < 8; e++) {
         int k = k_base + e;
         // A column-major: element (row=mn, col=k) → A[k * 16 + mn]
-        a_frag[e] = (__fp16)A[k * 16 + mn];
+        a_frag[e] = (_Float16)A[k * 16 + mn];
         // B row-major:    element (row=k,  col=mn) → B[k * 16 + mn]
-        b_frag[e] = (__fp16)B[k * 16 + mn];
+        b_frag[e] = (_Float16)B[k * 16 + mn];
     }
 
     // ------------------------------------------------------------------
