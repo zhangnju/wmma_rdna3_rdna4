@@ -360,19 +360,29 @@ int main(int argc, char** argv) {
     int M = 4096, N = 4096, K = 4096, reps = 10;
     if (argc >= 4) { M = std::atoi(argv[1]); N = std::atoi(argv[2]); K = std::atoi(argv[3]); }
     if (argc >= 5) reps = std::atoi(argv[4]);
-    if (M <= 0 || N <= 0 || K <= 0 || (M % 16) || (N % 16) || (K % 32)) {
-        printf("Usage: %s [M N K] [reps]  (M,N multiple of 16; K multiple of 32)\n", argv[0]);
+    // Steps 2-8 use a 128x128 macro tile; steps 2,3 assume divisible tiles (no OOB
+    // guard), so require M,N multiple of 128. K multiple of 32 covers every step's block_k.
+    if (M <= 0 || N <= 0 || K <= 0 || (M % 128) || (N % 128) || (K % 32)) {
+        printf("Usage: %s [M N K] [reps]  (M,N multiple of 128; K multiple of 32)\n", argv[0]);
         return 2;
     }
 
     const size_t szA = (size_t)M * K, szB = (size_t)N * K, szD = (size_t)M * N;
     std::vector<__half> hA(szA), hB(szB);
-    std::vector<float> hD(szD), ref(szD);
+    std::vector<float> hD(szD);
 
     // Small, well-conditioned data so the FP16 inputs + FP32 accumulate stay accurate at large K.
+    // Cast the modulus to signed int BEFORE subtracting: `i` is size_t, so `(... % 17) - 8`
+    // would underflow to a huge unsigned value (-> inf in FP16) for remainders < 8.
     constexpr float S = 1e-2f;
-    for (size_t i = 0; i < szA; i++) hA[i] = __float2half(S * (float)(((i * 7 + 3) % 17) - 8) * 0.1f);
-    for (size_t i = 0; i < szB; i++) hB[i] = __float2half(S * (float)(((i * 5 + 1) % 13) - 6) * 0.1f);
+    for (size_t i = 0; i < szA; i++) {
+        const int vA = (int)((i * 7 + 3) % 17) - 8;   // -8 .. 8
+        hA[i] = __float2half(S * (float)vA * 0.1f);
+    }
+    for (size_t i = 0; i < szB; i++) {
+        const int vB = (int)((i * 5 + 1) % 13) - 6;   // -6 .. 6
+        hB[i] = __float2half(S * (float)vB * 0.1f);
+    }
 
     __half *dA, *dB; float *dD;
     HIP_CHECK(hipMalloc(&dA, szA * sizeof(__half)));
@@ -381,29 +391,32 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipMemcpy(dA, hA.data(), szA * sizeof(__half), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(dB, hB.data(), szB * sizeof(__half), hipMemcpyHostToDevice));
 
-    // CPU reference only for modest sizes (the O(M*N*K) long-double loop is slow).
-    const bool do_cpu = (double)M * N * K <= 600e6;
+    // Independent reference: long-double GEMM at NS random output points (cost ~ NS*K).
+    // This validates every step on its own merits at any size -- not merely that later
+    // steps agree with step 1. Each step is also scanned in full for NaN/Inf.
+    constexpr int NS = 2048;
+    std::vector<int> sm(NS), sn(NS);
+    std::vector<double> sref(NS);
     double max_ref = 0.0;
-    if (do_cpu) {
-        for (int m = 0; m < M; m++)
-            for (int n = 0; n < N; n++) {
-                long double acc = 0;
-                for (int k = 0; k < K; k++)
-                    acc += (long double)__half2float(hA[(size_t)m * K + k]) *
-                           (long double)__half2float(hB[(size_t)n * K + k]);
-                ref[(size_t)m * N + n] = (float)acc;
-                if (std::fabs((double)acc) > max_ref) max_ref = std::fabs((double)acc);
-            }
+    {
+        unsigned seed = 0x9e3779b9u;
+        auto rnd = [&]() { seed = seed * 1664525u + 1013904223u; return seed >> 1; };
+        for (int sp = 0; sp < NS; sp++) {
+            const int m = rnd() % M, n = rnd() % N;
+            sm[sp] = m; sn[sp] = n;
+            long double acc = 0;
+            for (int k = 0; k < K; k++)
+                acc += (long double)__half2float(hA[(size_t)m * K + k]) *
+                       (long double)__half2float(hB[(size_t)n * K + k]);
+            sref[sp] = (double)acc;
+            max_ref = std::fmax(max_ref, std::fabs((double)acc));
+        }
     }
-
-    // Baseline (step 1) output is the GPU reference used to gate every other step
-    // when the CPU reference is too expensive to compute.
-    std::vector<float> baseline(szD);
 
     printf("GEMM FP16 opt  M=%d N=%d K=%d  reps=%d  (2*M*N*K = %.2f GFLOP)\n",
            M, N, K, reps, 2.0 * M * N * K / 1e9);
-    printf("CPU reference: %s\n", do_cpu ? "on (gates step 1)" : "off (steps gated vs step-1 GPU output)");
-    printf("%-20s %10s %10s %12s %6s\n", "step", "ms", "GFLOP/s", "max_rel_err", "pass");
+    printf("correctness: %d random points vs long-double reference + full NaN/Inf scan\n", NS);
+    printf("%-20s %10s %10s %11s %10s %6s\n", "step", "ms", "GFLOP/s", "abs_err", "rel_err", "pass");
 
     hipEvent_t t0, t1;
     HIP_CHECK(hipEventCreate(&t0));
@@ -417,17 +430,16 @@ int main(int argc, char** argv) {
         HIP_CHECK(hipDeviceSynchronize());
         HIP_CHECK(hipMemcpy(hD.data(), dD, szD * sizeof(float), hipMemcpyDeviceToHost));
 
-        if (s == 0) baseline = hD;  // trust step 1 (checked vs CPU below when available)
-
-        // Correctness: compare against CPU ref if we have it, else against step-1 output.
-        const std::vector<float>& cmp = do_cpu ? ref : baseline;
-        double me = 0.0, scale = do_cpu ? max_ref : 0.0;
-        for (size_t i = 0; i < szD; i++) {
-            me = std::fmax(me, std::fabs((double)hD[i] - (double)cmp[i]));
-            if (!do_cpu) scale = std::fmax(scale, std::fabs((double)cmp[i]));
-        }
-        const double rel = scale > 0 ? me / scale : me;
-        const bool pass = rel < 2e-2;
+        // Correctness: full NaN/Inf scan + absolute/relative error at the sampled
+        // points against the independent long-double reference.
+        bool finite = true;
+        for (size_t i = 0; i < szD; i++)
+            if (!std::isfinite(hD[i])) { finite = false; break; }
+        double ae = 0.0;
+        for (int sp = 0; sp < NS; sp++)
+            ae = std::fmax(ae, std::fabs((double)hD[(size_t)sm[sp] * N + sn[sp]] - sref[sp]));
+        const double rel = max_ref > 0 ? ae / max_ref : ae;
+        const bool pass = finite && rel < 2e-2;
         if (!pass) failures++;
 
         // Timing.
@@ -442,7 +454,8 @@ int main(int argc, char** argv) {
         const double ms = ms_total / reps;
         const double gflops = 2.0 * M * N * K / (ms * 1e-3) / 1e9;
 
-        printf("%-20s %10.3f %10.1f %12.2e %6s\n", kSteps[s].name, ms, gflops, rel, pass ? "ok" : "FAIL");
+        printf("%-20s %10.3f %10.1f %11.2e %10.2e %6s\n", kSteps[s].name, ms, gflops, ae, rel,
+               !finite ? "NAN!" : (pass ? "ok" : "FAIL"));
     }
 
     HIP_CHECK(hipEventDestroy(t0));
