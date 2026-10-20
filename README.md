@@ -54,7 +54,41 @@ All samples are in the [`samples/`](samples/) directory. Each program includes a
 |------|------|
 | [mlp_wmma_rdna4.cpp](samples/mlp_wmma_rdna4.cpp) | 两层 MLP 推理（`output = W2 * relu(W1 * input)`），演示链式 WMMA 与共享内存中转 |
 | [tiled_gemm_rdna4.cpp](samples/tiled_gemm_rdna4.cpp) | 任意尺寸 M×N×K 矩阵的 Tiled GEMM（16 的倍数），支持命令行参数 |
+| [gemm_fp16_opt_rdna.cpp](samples/gemm_fp16_opt_rdna.cpp) | **FP16 GEMM 八步优化教程**：从 naive 单波前逐步优化到接近 hipBLASLt 的内核，同一文件内含逐步 benchmark（ms / GFLOP-s / 正确性）。跨 RDNA 3 与 RDNA 4，已在 **W7900（gfx1100）** 与 **R9700（gfx1201）** 上验证 |
 | [rocwmma_example.cpp](samples/rocwmma_example.cpp) | 使用高层 rocWMMA 模板库，架构可移植（RDNA 3/4 及 CDNA） |
+
+#### FP16 GEMM 优化步骤（`gemm_fp16_opt_rdna.cpp`）
+
+参照 ROCm 博客 [*FP16 GEMM Optimization on AMD RDNA 3 and RDNA 4*](https://rocm.blogs.amd.com/software-tools-optimization/rdna-fp16-gemm/README.html)，将同一个 GEMM 内核分八步迭代优化，每一步只改动一个“旋钮”：
+
+| 步骤 | 技术 | 说明 |
+|------|------|------|
+| 1 | baseline | 单波前负责 32×32 输出瓦片（2×2 个 16×16 WMMA），标量 LDS 拷贝 |
+| 2 | tiling + 双缓冲 | 128×128 瓦片、16 波前、128-bit 宽加载、双 LDS 缓冲区软流水 |
+| 3 | LDS padding | 行填充消除 shared memory bank conflict |
+| 4 | OOB-safe | 带边界保护的宽加载，使 M、N 不必整除瓦片（博客中用 buffer resource descriptor） |
+| 5 | deep-K | block_k 16→32，减少 barrier、每次同步做更多运算 |
+| 6 | block scheduling | 分组启动 block，使相邻 block 复用 L2 中的 A/B |
+| 7 | prefetch + s_setprio | WMMA 执行时将下一瓦片预取进寄存器，`s_setprio` 偏置矩阵指令发射 |
+| 8 | single buffer | 去掉第二个 LDS 缓冲（LDS 减半、占用率翻倍）+ 一次额外 barrier |
+
+**实测（8192³，20 次平均）**：
+
+| GPU | baseline | 最终 | 加速比 | 峰值 |
+|-----|----------|------|--------|------|
+| W7900 (gfx1100) | 738 ms | 13.5 ms（step 8） | ~55× | 81.7 TFLOP/s |
+| R9700 (gfx1201) | 733 ms | 12.6 ms（step 7） | ~58× | 87.0 TFLOP/s |
+
+**与 hipBLASLt 对比（同一 `rocm/dev-ubuntu-24.04:10.0.0-full` 容器内，ROCm 10.0 / hipBLASLt 1.4.1，8192³）**：
+
+| GPU | hipBLASLt | 本例最佳 | 相对 hipBLASLt |
+|-----|-----------|----------|----------------|
+| W7900 (gfx1100) | 14.69 ms（74.8 TFLOP/s） | **13.29 ms（step 7，82.8 TFLOP/s）** | **~110%，超过 hipBLASLt** |
+| R9700 (gfx1201) | **10.61 ms（103.6 TFLOP/s）** | 12.64 ms（step 7，87.0 TFLOP/s） | ~84%，未超过 |
+
+> 注 1：step 8（单缓冲）的收益与架构/尺寸相关。W7900 上 step 8 与 step 7 相当（均超过 hipBLASLt）；但 R9700 在 8192³ 下双缓冲的 step 7 明显更优，去掉双缓冲损失的预取/计算重叠超过了占用率提升的收益。
+>
+> 注 2：与博客结论一致——自定义内核在 RDNA 3（gfx1100）上可超过 hipBLASLt（博客 ~125%，本例 ~110%），但在 RDNA 4（gfx1201）上 hipBLASLt 调优更强，自定义内核约为其 84%~92%。
 
 ---
 
@@ -74,6 +108,12 @@ hipcc --offload-arch=gfx1100 -std=c++20 samples/wmma_rdna3_iu4.cpp -o wmma_rdna3
 
 # FP16/BF16 累加器
 hipcc --offload-arch=gfx1100 samples/wmma_rdna3_f16_bf16_acc.cpp -o wmma_rdna3_f16_bf16_acc
+
+# FP16 GEMM 八步优化（W7900 / gfx1100）
+hipcc --offload-arch=gfx1100 -O3 -std=c++17 -mcumode \
+  -Rpass-analysis=kernel-resource-usage \
+  samples/gemm_fp16_opt_rdna.cpp -o gemm_fp16_opt_rdna
+./gemm_fp16_opt_rdna 8192 8192 8192 20    # [M N K] [reps]，默认 1024 1024 1024 10
 ```
 
 ### RDNA 4（gfx1201）
@@ -92,6 +132,12 @@ hipcc --offload-arch=gfx1201 -std=c++20 samples/wmma_rdna4_iu4.cpp -o wmma_rdna4
 # MLP 与 Tiled GEMM
 hipcc --offload-arch=gfx1201 samples/mlp_wmma_rdna4.cpp -o mlp_wmma_rdna4
 hipcc --offload-arch=gfx1201 samples/tiled_gemm_rdna4.cpp -o tiled_gemm_rdna4
+
+# FP16 GEMM 八步优化（R9700 / gfx1201）
+hipcc --offload-arch=gfx1201 -O3 -std=c++17 -mcumode \
+  -Rpass-analysis=kernel-resource-usage \
+  samples/gemm_fp16_opt_rdna.cpp -o gemm_fp16_opt_rdna
+./gemm_fp16_opt_rdna 8192 8192 8192 20
 
 # rocWMMA（需安装 rocWMMA 7.x+）
 hipcc --offload-arch=native samples/rocwmma_example.cpp -o rocwmma_example
