@@ -5,8 +5,8 @@
 //   R9700 / RDNA 4:  hipcc --offload-arch=gfx1201 -O3 -std=c++17 -mcumode \
 //                      -Rpass-analysis=kernel-resource-usage samples/gemm_fp16_opt_rdna.cpp -o gemm_fp16_opt_rdna
 //
-// Run:  ./gemm_fp16_opt_rdna [M N K] [reps]      (defaults: 1024 1024 1024, 10 reps)
-//       ./gemm_fp16_opt_rdna 8192 8192 8192 20   (large, timing-only self-check)
+// Run:  ./gemm_fp16_opt_rdna [M N K] [reps]      (defaults: 4096 4096 4096, 10 reps)
+//       ./gemm_fp16_opt_rdna 8192 8192 8192 20   (blog size; note throughput peaks near 4096)
 //
 // -----------------------------------------------------------------------------
 // FP16 GEMM optimization walkthrough for AMD RDNA 3 (gfx11) and RDNA 4 (gfx12),
@@ -357,7 +357,7 @@ static const Step kSteps[] = {
 static constexpr int kNumSteps = sizeof(kSteps) / sizeof(kSteps[0]);
 
 int main(int argc, char** argv) {
-    int M = 1024, N = 1024, K = 1024, reps = 10;
+    int M = 4096, N = 4096, K = 4096, reps = 10;
     if (argc >= 4) { M = std::atoi(argv[1]); N = std::atoi(argv[2]); K = std::atoi(argv[3]); }
     if (argc >= 5) reps = std::atoi(argv[4]);
     if (M <= 0 || N <= 0 || K <= 0 || (M % 16) || (N % 16) || (K % 32)) {
