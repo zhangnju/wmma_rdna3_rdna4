@@ -55,6 +55,7 @@ All samples are in the [`samples/`](samples/) directory. Each program includes a
 | [mlp_wmma_rdna4.cpp](samples/mlp_wmma_rdna4.cpp) | 两层 MLP 推理（`output = W2 * relu(W1 * input)`），演示链式 WMMA 与共享内存中转 |
 | [tiled_gemm_rdna4.cpp](samples/tiled_gemm_rdna4.cpp) | 任意尺寸 M×N×K 矩阵的 Tiled GEMM（16 的倍数），支持命令行参数 |
 | [gemm_fp16_opt_rdna.cpp](samples/gemm_fp16_opt_rdna.cpp) | **FP16 GEMM 八步优化教程**：从 naive 单波前逐步优化到接近 hipBLASLt 的内核，同一文件内含逐步 benchmark（ms / GFLOP-s / 正确性）。跨 RDNA 3 与 RDNA 4，已在 **W7900（gfx1100）** 与 **R9700（gfx1201）** 上验证 |
+| [hipblaslt_bench.cpp](samples/hipblaslt_bench.cpp) | hipBLASLt FP16 GEMM 吞吐基准（best-of-heuristics），与上面的内核**同条件对比**（FP16 输入 / FP32 累加 / FP32 输出 / 同 shape / 同卡）。需链接 `-lhipblaslt` |
 | [rocwmma_example.cpp](samples/rocwmma_example.cpp) | 使用高层 rocWMMA 模板库，架构可移植（RDNA 3/4 及 CDNA） |
 
 #### FP16 GEMM 优化步骤（`gemm_fp16_opt_rdna.cpp`）
@@ -86,6 +87,8 @@ All samples are in the [`samples/`](samples/) directory. Each program includes a
 | W7900 (gfx1100) | 14.69 ms（74.8 TFLOP/s） | **13.29 ms（step 7，82.8 TFLOP/s）** | **~110%，超过 hipBLASLt** |
 | R9700 (gfx1201) | **10.61 ms（103.6 TFLOP/s）** | 12.64 ms（step 7，87.0 TFLOP/s） | ~84%，未超过 |
 
+> hipBLASLt 数字由 [`samples/hipblaslt_bench.cpp`](samples/hipblaslt_bench.cpp) 在同一张卡、同一容器、同 shape、同精度（FP16 输入 / FP32 累加 / FP32 输出）下测得,可复现。
+
 > 注 1：step 8（单缓冲）的收益与架构/尺寸相关。W7900 上 step 8 与 step 7 相当（均超过 hipBLASLt）；但 R9700 在 8192³ 下双缓冲的 step 7 明显更优，去掉双缓冲损失的预取/计算重叠超过了占用率提升的收益。
 >
 > 注 2：与博客结论一致——自定义内核在 RDNA 3（gfx1100）上可超过 hipBLASLt（博客 ~125%，本例 ~110%），但在 RDNA 4（gfx1201）上 hipBLASLt 调优更强，自定义内核约为其 84%~92%。
@@ -113,7 +116,11 @@ hipcc --offload-arch=gfx1100 samples/wmma_rdna3_f16_bf16_acc.cpp -o wmma_rdna3_f
 hipcc --offload-arch=gfx1100 -O3 -std=c++17 -mcumode \
   -Rpass-analysis=kernel-resource-usage \
   samples/gemm_fp16_opt_rdna.cpp -o gemm_fp16_opt_rdna
-./gemm_fp16_opt_rdna 8192 8192 8192 20    # [M N K] [reps]，默认 1024 1024 1024 10
+./gemm_fp16_opt_rdna 8192 8192 8192 20    # [M N K] [reps]，默认 4096 4096 4096 10
+
+# hipBLASLt 吞吐基准（对比用，W7900）
+hipcc --offload-arch=gfx1100 -O3 -std=c++17 samples/hipblaslt_bench.cpp -o hipblaslt_bench -lhipblaslt
+./hipblaslt_bench 8192 8192 8192 20
 ```
 
 ### RDNA 4（gfx1201）
@@ -138,6 +145,10 @@ hipcc --offload-arch=gfx1201 -O3 -std=c++17 -mcumode \
   -Rpass-analysis=kernel-resource-usage \
   samples/gemm_fp16_opt_rdna.cpp -o gemm_fp16_opt_rdna
 ./gemm_fp16_opt_rdna 8192 8192 8192 20
+
+# hipBLASLt 吞吐基准（对比用，R9700）
+hipcc --offload-arch=gfx1201 -O3 -std=c++17 samples/hipblaslt_bench.cpp -o hipblaslt_bench -lhipblaslt
+./hipblaslt_bench 8192 8192 8192 20
 
 # rocWMMA（需安装 rocWMMA 7.x+）
 hipcc --offload-arch=native samples/rocwmma_example.cpp -o rocwmma_example
