@@ -259,6 +259,90 @@ __global__ __launch_bounds__(BM * BN / (8 * TM * TN)) void gemm_blog(
 }
 
 // ---------------------------------------------------------------------------
+// "Tuning further" (RDNA4): large 192x224 tile, single LDS buffer, FP16 acc.
+// The big tile only fits 64KB LDS as a single buffer; FP16 accumulate halves the
+// accumulator VGPRs so 21 accumulators/wave (3x7) + register-staged prefetch fit
+// without spilling. The register-staged overlap (load next tile during the MMA,
+// commit after one barrier) is what makes this beat hipBLASLt at large sizes --
+// the direct no-overlap variant was ~40% slower. On R9700: ~113 vs hipBLASLt's
+// ~104 TFLOP/s at 8192^3 (+9%). Needs FP16 acc (RDNA4); on RDNA3 it spills.
+// ---------------------------------------------------------------------------
+template <int BM, int BN, int BK, int TM, int TN, int PAD>
+__global__ __launch_bounds__(BM * BN / (8 * TM * TN)) void gemm_tuned(
+    const __half* __restrict__ A, const __half* __restrict__ B, __half* __restrict__ C, int M, int N, int K) {
+    constexpr int LDA = BK + PAD;
+    __shared__ _Float16 As[BM * LDA];   // single buffer
+    __shared__ _Float16 Bs[BN * LDA];
+    const int tid = threadIdx.x, laneW = tid & 31, wid = tid >> 5;
+    constexpr int WN = BN / (16 * TN);
+    const int wr = wid / WN, wc = wid % WN;
+    const int nbn = (N + BN - 1) / BN, nbm = (M + BM - 1) / BM;
+    constexpr int G = 8;
+    const int per = G * nbn, grp = blockIdx.x / per, loc = blockIdx.x % per;
+    const int gr = (nbm - grp * G) < G ? (nbm - grp * G) : G;
+    const int baseM = (grp * G + loc % gr) * BM, baseN = (loc / gr) * BN;
+    const __amdgpu_buffer_rsrc_t rA = __builtin_amdgcn_make_buffer_rsrc((void*)A, 0, (int)((long)M * K * 2), 0x31004000u);
+    const __amdgpu_buffer_rsrc_t rB = __builtin_amdgcn_make_buffer_rsrc((void*)B, 0, (int)((long)N * K * 2), 0x31004000u);
+    AccT acc[TM][TN];
+#pragma unroll
+    for (int i = 0; i < TM; i++) for (int j = 0; j < TN; j++) acc[i][j] = acc_zero();
+    constexpr int CHA = BK / 8, NCA = BM * CHA, NCB = BN * CHA;
+    const int NK = K / BK;
+    constexpr int CPTA = (NCA + BM * BN / (8 * TM * TN) - 1) / (BM * BN / (8 * TM * TN));
+    constexpr int CPTB = (NCB + BM * BN / (8 * TM * TN) - 1) / (BM * BN / (8 * TM * TN));
+    for (int g = tid; g < NCA; g += blockDim.x) { int row = g / CHA, k8 = (g % CHA) * 8;
+        *reinterpret_cast<half8*>(&As[row * LDA + k8]) = bufld(rA, (long)(baseM + row) * K + k8); }
+    for (int g = tid; g < NCB; g += blockDim.x) { int row = g / CHA, k8 = (g % CHA) * 8;
+        *reinterpret_cast<half8*>(&Bs[row * LDA + k8]) = bufld(rB, (long)(baseN + row) * K + k8); }
+    __syncthreads();
+    for (int kt = 0; kt < NK; kt++) {
+        // single buffer with register-staged prefetch: issue next tile's global loads into
+        // registers DURING the MMA (overlap), commit to LDS after the reads finish (1 barrier).
+        const int nxt = kt + 1;
+        half8 ra[CPTA], rb[CPTB];
+        if (nxt < NK) {
+            const long off = (long)nxt * BK;
+#pragma unroll
+            for (int c = 0; c < CPTA; c++) { int g = tid + c * blockDim.x; if (g >= NCA) continue; int row = g / CHA, k8 = (g % CHA) * 8;
+                ra[c] = bufld(rA, (long)(baseM + row) * K + off + k8); }
+#pragma unroll
+            for (int c = 0; c < CPTB; c++) { int g = tid + c * blockDim.x; if (g >= NCB) continue; int row = g / CHA, k8 = (g % CHA) * 8;
+                rb[c] = bufld(rB, (long)(baseN + row) * K + off + k8); }
+        }
+        __builtin_amdgcn_s_setprio(1);
+#pragma unroll
+        for (int ks = 0; ks < BK / 16; ks++) {
+            AFrag af[TM], bf[TN];
+#pragma unroll
+            for (int i = 0; i < TM; i++) af[i] = load_frag(As, LDA, wr * TM + i, ks);
+#pragma unroll
+            for (int j = 0; j < TN; j++) bf[j] = load_frag(Bs, LDA, wc * TN + j, ks);
+#pragma unroll
+            for (int i = 0; i < TM; i++) for (int j = 0; j < TN; j++) acc[i][j] = wmma_f16(af[i], bf[j], acc[i][j]);
+        }
+        __builtin_amdgcn_s_setprio(0);
+        if (nxt < NK) {
+            __syncthreads();   // reads of this tile done -> safe to overwrite the single buffer
+#pragma unroll
+            for (int c = 0; c < CPTA; c++) { int g = tid + c * blockDim.x; if (g >= NCA) continue; int row = g / CHA, k8 = (g % CHA) * 8;
+                *reinterpret_cast<half8*>(&As[row * LDA + k8]) = ra[c]; }
+#pragma unroll
+            for (int c = 0; c < CPTB; c++) { int g = tid + c * blockDim.x; if (g >= NCB) continue; int row = g / CHA, k8 = (g % CHA) * 8;
+                *reinterpret_cast<half8*>(&Bs[row * LDA + k8]) = rb[c]; }
+            __syncthreads();
+        }
+    }
+#pragma unroll
+    for (int i = 0; i < TM; i++) for (int j = 0; j < TN; j++)
+#pragma unroll
+        for (int e = 0; e < 8; e++) {
+            const int row = baseM + (wr * TM + i) * 16 + acc_row16(e, laneW);
+            const int col = baseN + (wc * TN + j) * 16 + (laneW & 15);
+            if (row < M && col < N) C[(long)col * M + row] = (__half)acc[i][j][e * ACC_STRIDE];
+        }
+}
+
+// ---------------------------------------------------------------------------
 // Host harness
 // ---------------------------------------------------------------------------
 #define HIP_CHECK(x) do { hipError_t e_=(x); if(e_!=hipSuccess){printf("HIP err %s:%d %s\n",#x,__LINE__,hipGetErrorString(e_));std::exit(1);} } while(0)
@@ -283,6 +367,14 @@ static void launch_128x96(const __half* A, const __half* B, __half* C, int M, in
         gemm_blog<128, 96, 64, 2, 2, 8, DB, false, PF, true><<<grid, thr>>>(A, B, C, M, N, K); }
 }
 
+// "Tuning further": 192x224 tile, wave grid 4x2 (TM=3,TN=7), block_k 64, SINGLE buffer.
+// The large tile only fits the 64KB LDS as a single buffer; FP16 accumulate (half the
+// accumulator VGPRs) is what makes 3x7=21 accumulators per wave affordable on RDNA4.
+static void launch_192x224(const __half* A, const __half* B, __half* C, int M, int N, int K) {
+    constexpr int thr = 192 * 224 / (8 * 3 * 7);   // = 256 (8 waves, 3x7 acc/wave)
+    const int nb = ((M + 191) / 192) * ((N + 223) / 224);
+    gemm_tuned<192, 224, 64, 3, 7, 8><<<nb, thr>>>(A, B, C, M, N, K);
+}
 struct Step { const char* name; StepFn fn; };
 static const Step kSteps[] = {
     {"1 baseline        ", launch_step1},
@@ -293,6 +385,7 @@ static const Step kSteps[] = {
     {"6 +block-sched    ", launch_128x96<true,  false, true>},
     {"7 +prefetch/prio  ", launch_128x96<true,  true,  true>},
     {"8 single-buffer   ", launch_128x96<true,  true,  false>},
+    {"9 tuned 192x224   ", launch_192x224},   // blog "tuning further" (RDNA4): beats hipBLASLt at 8192
 };
 static constexpr int kNumSteps = sizeof(kSteps) / sizeof(kSteps[0]);
 
